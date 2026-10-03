@@ -11,7 +11,7 @@ export default defineConfig({
     preact(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'mat/*', 'samples/*'],
+      includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'OptiFrame',
         short_name: 'OptiFrame',
@@ -28,9 +28,26 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // heavy runtimes (OpenCV.js, ONNX Runtime, model) are cached for offline use
-        globPatterns: ['**/*.{js,css,html,svg,png,jpg,json,wasm,onnx,mjs,pdf}'],
-        maximumFileSizeToCacheInBytes: 32 * 1024 * 1024,
+        // the app shell is precached; the heavy engines (OpenCV.js 10 MB, ONNX
+        // Runtime wasm 14 MB, model 2 MB) are cached the first time the
+        // worker downloads them, so they are not fetched twice
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        globIgnores: ['opencv/**', 'models/**', 'samples/**', 'mat/**'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        clientsClaim: true,
+        skipWaiting: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /\/opencv\//.test(url.pathname) || url.pathname.endsWith('.wasm'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'optiframe-engines', expiration: { maxEntries: 8 } },
+          },
+          {
+            urlPattern: ({ url }) => /\/(models|samples|mat)\//.test(url.pathname),
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'optiframe-data', expiration: { maxEntries: 16 } },
+          },
+        ],
       },
     }),
   ],

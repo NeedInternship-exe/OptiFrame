@@ -7,7 +7,7 @@ import { Camera } from './Camera.tsx';
 import { analyse, fromBlob, fromUrl, type Captured } from './capture.ts';
 import { drawControl, outlinePath } from './draw.ts';
 import { IconCamera, IconDownload, IconImage, IconSpark, IconTrash } from './icons.tsx';
-import { getState, lensFor, setState, useStore, type LastRun } from './store.ts';
+import { getState, lensFor, setState, shotLens, useStore, type LastRun } from './store.ts';
 
 const STAGES: [string, string][] = [
   ['markers', 'Repères du tapis'],
@@ -101,7 +101,7 @@ function RunResult({ last }: { last: LastRun }) {
         .filter((z) => z.contour)
         .map((z) => {
           const shot = shots.find((s) => s.raw === z.contour) ?? shots.find((s) => s.eye === z.zone);
-          const m = measureLens(z.contour!, st.settings.align).measures;
+          const m = shot ? shotLens(shot).measures : measureLens(z.contour!, st.settings.align).measures;
           return (
             <div class="zone-result">
               <div class="zone-head">

@@ -82,22 +82,24 @@ export function drawControl(canvas: HTMLCanvasElement, patch: ImagePatch, raw: P
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  const rect = boxingRaw(raw, m.angle);
-  ctx.strokeStyle = COLORS.box;
-  ctx.lineWidth = 1.2;
-  ctx.setLineDash([6, 4]);
-  pathPoly(v, rect);
-  ctx.stroke();
-  ctx.setLineDash([]);
   ctx.strokeStyle = COLORS.contour;
   ctx.lineWidth = 2;
   pathPoly(v, raw);
   ctx.stroke();
-  // dimension labels at the middle of the top and right sides of the box
-  const mid = (a: Vec2, c: Vec2): Vec2 => [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
-  const top = P(v, mid(rect[0], rect[1])), right = P(v, mid(rect[1], rect[2]));
-  label(ctx, `A ${fmt(m.A, 1)} mm`, top[0], Math.max(16, top[1] - 6));
-  label(ctx, `B ${fmt(m.B, 1)} mm`, Math.min(widthPx - 50, right[0] + 2), right[1] + 5);
+  if (Number.isFinite(m.A)) {
+    const rect = boxingRaw(raw, m.angle);
+    ctx.strokeStyle = COLORS.box;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([6, 4]);
+    pathPoly(v, rect);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // dimension labels at the middle of the top and right sides of the box
+    const mid = (a: Vec2, c: Vec2): Vec2 => [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
+    const top = P(v, mid(rect[0], rect[1])), right = P(v, mid(rect[1], rect[2]));
+    label(ctx, `A ${fmt(m.A, 1)} mm`, top[0], Math.max(16, top[1] - 6));
+    label(ctx, `B ${fmt(m.B, 1)} mm`, Math.min(widthPx - 50, right[0] + 2), right[1] + 5);
+  }
   // 10 mm scale bar
   const sb = 10 * k;
   ctx.fillStyle = 'rgba(15,23,42,0.78)';

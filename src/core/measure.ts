@@ -12,32 +12,35 @@ export interface Measures {
   angle: number; // deg, rotation applied to align the lens with the boxing axes
 }
 
-/** Height of the boxing rectangle for a rotation of `deg`. */
-function boxHeight(p: Poly, deg: number): number {
+/** Area of the boxing rectangle for a rotation of `deg`. */
+function boxArea(p: Poly, deg: number): number {
   const a = (deg * Math.PI) / 180, s = Math.sin(a), c = Math.cos(a);
-  let mn = Infinity, mx = -Infinity;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of p) {
-    const yr = x * s + y * c;
-    if (yr < mn) mn = yr;
-    if (yr > mx) mx = yr;
+    const xr = x * c - y * s, yr = x * s + y * c;
+    if (xr < x0) x0 = xr;
+    if (xr > x1) x1 = xr;
+    if (yr < y0) y0 = yr;
+    if (yr > y1) y1 = yr;
   }
-  return mx - mn;
+  return (x1 - x0) * (y1 - y0);
 }
 
 /**
- * Orientation that best matches how the lens is held for a caliper reading:
- * the rotation (within +/- range) that minimises the boxing height B. On the
- * mat the lens is placed roughly level, so the search range stays small.
+ * Small levelling of a lens placed slightly askew: the rotation (within
+ * +/- range) giving the smallest boxing rectangle. For rectangular and oval
+ * outlines this is the orientation where caliper jaws sit flat on the sides.
+ * The user is asked to place the lens level, so the range stays small.
  */
-export function autoAngle(p: Poly, range = 15): number {
-  let best = 0, bestH = Infinity;
+export function autoAngle(p: Poly, range = 8): number {
+  let best = 0, bestA = boxArea(p, 0) * 0.999; // slight preference for "as placed"
   for (let d = -range; d <= range + 1e-9; d += 0.5) {
-    const h = boxHeight(p, d);
-    if (h < bestH) [bestH, best] = [h, d];
+    const a = boxArea(p, d);
+    if (a < bestA) [bestA, best] = [a, d];
   }
   for (let d = best - 0.5; d <= best + 0.5 + 1e-9; d += 0.05) {
-    const h = boxHeight(p, d);
-    if (h < bestH) [bestH, best] = [h, d];
+    const a = boxArea(p, d);
+    if (a < bestA) [bestA, best] = [a, d];
   }
   return Math.abs(best) < 0.05 ? 0 : best;
 }

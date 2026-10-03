@@ -1,10 +1,10 @@
 // Tiny global store with localStorage persistence (measurements survive a reload).
 import { useEffect, useState } from 'preact/hooks';
 import { fuseContours, spread, type Spread } from '../core/fusion.ts';
-import { mirrorX, type Poly } from '../core/geom.ts';
+import { centroid, mirrorX, offsetNormal, type Poly } from '../core/geom.ts';
 import type { Eye } from '../core/mat.ts';
 import { measureLens, type Measures } from '../core/measure.ts';
-import { DEFAULT_FRAME, type FrameParams, type GrooveCheck } from '../frame/frame.ts';
+import { DEFAULT_FRAME, type FrameParams, type GrooveCheck, type PlacedLens } from '../frame/frame.ts';
 import type { EngineStatus } from '../vision/client.ts';
 import type { PipelineResult, Quality } from '../vision/types.ts';
 
@@ -51,6 +51,7 @@ export interface FrameSummary {
   thickness: number;
   ms: number;
   lensSources: Record<Eye, string>;
+  lenses: PlacedLens[];
 }
 
 export type Use = 'latest' | 'fusion' | string;
@@ -127,10 +128,22 @@ export function useStore(): State {
 
 // ----------------------------------------------------------------- derived data
 const cache = new Map<string, { contour: Poly; measures: Measures }>();
-export function shotLens(s: Shot, align: boolean) {
-  const k = `${s.id}:${align}`;
+/**
+ * Lens outline + measures of a shot. Print-scale and bias calibrations are
+ * applied here (not in the pipeline) so that they also update past shots.
+ */
+export function shotLens(s: Shot, cfg: Pick<Settings, 'align' | 'printScale' | 'bias'> = state.settings) {
+  const k = `${s.id}:${cfg.align}:${cfg.printScale}:${cfg.bias}`;
   let v = cache.get(k);
-  if (!v) cache.set(k, (v = measureLens(s.raw, align)));
+  if (!v) {
+    let raw = s.raw;
+    if (cfg.printScale !== 1) {
+      const c = centroid(raw);
+      raw = raw.map(([x, y]) => [c[0] + (x - c[0]) * cfg.printScale, c[1] + (y - c[1]) * cfg.printScale]);
+    }
+    if (cfg.bias) raw = offsetNormal(raw, cfg.bias);
+    cache.set(k, (v = measureLens(raw, cfg.align)));
+  }
   return v;
 }
 
@@ -146,16 +159,16 @@ export interface LensChoice {
 
 export function lensFor(st: State, eye: Eye): LensChoice | null {
   const shots = st.shots.filter((s) => s.eye === eye).sort((a, b) => a.time - b.time);
-  const align = st.settings.align;
-  const sp = spread(shots.map((s) => shotLens(s, align).measures));
+  const cfg = st.settings;
+  const sp = spread(shots.map((s) => shotLens(s, cfg).measures));
   if (!shots.length) return null;
   const use = st.use[eye];
   if (use === 'fusion' && shots.length > 1) {
-    const contour = fuseContours(shots.map((s) => shotLens(s, align).contour));
+    const contour = fuseContours(shots.map((s) => shotLens(s, cfg).contour));
     return { eye, contour, measures: measureLens(contour, false).measures, label: `fusion de ${shots.length} prises`, shots, spread: sp };
   }
   const pick = shots.find((s) => s.id === use) ?? shots[shots.length - 1];
-  const l = shotLens(pick, align);
+  const l = shotLens(pick, cfg);
   return { eye, contour: l.contour, measures: l.measures, label: `prise de ${new Date(pick.time).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })}`, shots, spread: sp };
 }
 

@@ -85,6 +85,7 @@ export function FrameTab() {
             thickness: r.thickness,
             ms: r.ms,
             lensSources: { OD: pair.OD.label, OS: pair.OS.label },
+            lenses: r.lenses,
           },
         });
       } catch (e) {

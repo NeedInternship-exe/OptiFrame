@@ -58,7 +58,7 @@ async function loadOpenCV(base: string): Promise<any> {
 
 async function loadModel(base: string): Promise<ModelRunner | null> {
   try {
-    ort.env.wasm.wasmPaths = `${base}ort/`;
+    // the ORT wasm binary is emitted by Vite next to the worker bundle
     ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
     const bytes = await fetchWithProgress(`${base}models/lens_seg.onnx`, 'model');
     const session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });

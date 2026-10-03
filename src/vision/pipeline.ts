@@ -9,7 +9,7 @@
 //
 // This module is shared by the Web Worker (browser) and the Node benchmark.
 
-import { offsetNormal, centroid, type Poly, type Vec2 } from '../core/geom.ts';
+import { offsetNormal, centroid, type Vec2 } from '../core/geom.ts';
 import { applyH, cameraPose, correctParallax, localScale, mul3, type Mat3 } from '../core/homography.ts';
 import { MAT, MARKER_BY_ID, type Eye } from '../core/mat.ts';
 import { detectMarkers, refineMarker, type Gray } from './aruco.ts';

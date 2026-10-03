@@ -54,8 +54,8 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
       useModel: settings.useModel,
       refine: settings.refine,
       edgeHeight: settings.edgeHeight,
-      printScale: settings.printScale,
-      bias: settings.bias,
+      printScale: 1, // applied retroactively in shotLens()
+      bias: 0,
       debug: true,
     },
     onStage,
