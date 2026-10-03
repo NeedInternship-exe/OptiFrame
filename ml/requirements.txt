@@ -1,0 +1,11 @@
+# Versions used to train the published model (Apple M4, MPS)
+torch==2.14.1
+torchvision==0.29.1
+numpy==2.5.3
+opencv-python-headless>=4.9
+onnx==1.23.1
+onnxruntime==1.30.0
+onnxscript==0.7.2
+pillow==12.3.0
+reportlab==5.0.1
+matplotlib==3.11.2

@@ -100,8 +100,11 @@ def write_pdf(spec: dict, path: Path) -> None:
     cell = MARKER / 6
     c.setFillColor(black)
     for m in spec["markers"]:
+        # one path per marker: a single fill has no hairline seams between cells
+        path = c.beginPath()
         for r, s, n in black_runs(m["bits"]):
-            c.rect((m["x"] + s * cell) * mm, Y(m["y"] + (r + 1) * cell), n * cell * mm, cell * mm, stroke=0, fill=1)
+            path.rect((m["x"] + s * cell) * mm, Y(m["y"] + (r + 1) * cell), n * cell * mm, cell * mm)
+        c.drawPath(path, stroke=0, fill=1)
 
     grey = Color(0.55, 0.55, 0.55)
     # zone corner ticks (outside the zone so nothing is printed under the lens)
@@ -166,11 +169,11 @@ def write_svg(spec: dict, path: Path) -> None:
         f'<rect width="{PAGE_W}" height="{PAGE_H}" fill="#fff"/>',
     ]
     for m in spec["markers"]:
-        for r, s, n in black_runs(m["bits"]):
-            out.append(
-                f'<rect x="{m["x"] + s * cell:.3f}" y="{m["y"] + r * cell:.3f}" width="{n * cell:.3f}" '
-                f'height="{cell:.3f}" fill="#000"/>'
-            )
+        d = "".join(
+            f"M{m['x'] + s * cell:.3f},{m['y'] + r * cell:.3f}h{n * cell:.3f}v{cell:.3f}h{-n * cell:.3f}z"
+            for r, s, n in black_runs(m["bits"])
+        )
+        out.append(f'<path d="{d}" fill="#000"/>')
     for name, z in spec["zones"].items():
         x0, y0, x1, y1 = z["x"], z["y"], z["x"] + z["w"], z["y"] + z["h"]
         L, g = 6.0, 2.0
