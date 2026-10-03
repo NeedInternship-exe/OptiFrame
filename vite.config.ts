@@ -36,6 +36,9 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         clientsClaim: true,
         skipWaiting: true,
+        // only app routes fall back to index.html: real files (the mat PDF,
+        // SVG, images...) must reach the network/cache, never the app shell
+        navigateFallbackDenylist: [/\.[a-z0-9]+$/i],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => /\/opencv\//.test(url.pathname) || url.pathname.endsWith('.wasm'),

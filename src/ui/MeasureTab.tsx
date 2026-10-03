@@ -211,7 +211,7 @@ export function MeasureTab() {
             </li>
           </ol>
           <button class="btn ghost" onClick={() => run(() => fromUrl(SAMPLE), 'sample')} disabled={engine.state !== 'ready' || !!stage}>
-            <IconSpark /> Pas de tapis ? Essayer avec une photo d’exemple
+            <IconSpark /> Pas de tapis ? Essayer avec une photo d’exemple (synthétique)
           </button>
         </section>
       )}
@@ -233,7 +233,7 @@ export function MeasureTab() {
       </div>
       {st.onboarded && (
         <button class="link-btn" onClick={() => run(() => fromUrl(SAMPLE), 'sample')} disabled={engine.state !== 'ready' || !!stage}>
-          Essayer avec la photo d’exemple
+          Essayer avec la photo d’exemple (synthétique)
         </button>
       )}
 

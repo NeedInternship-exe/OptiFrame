@@ -74,6 +74,7 @@ def main():
     ap.add_argument("--n", type=int, default=24)
     ap.add_argument("--out", default="../bench/photos")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--res", default="4032x3024", help="photo size, e.g. 1920x1440 for a browser video frame")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -101,7 +102,8 @@ def main():
             lenses.append({"zone": z, "poly": poly_mm.round(4).tolist()})
         flat, _ = render_lenses(bg, polys_px, PPM, rng, backlit)
 
-        W, H = (4032, 3024) if rng.random() < 0.5 else (3024, 4032)
+        rw, rh = (int(v) for v in args.res.split("x"))
+        W, H = (rw, rh) if rng.random() < 0.5 else (rh, rw)
         if mode == "pair":
             target, span = (SPEC["page"]["w"] / 2, SPEC["page"]["h"] / 2), (SPEC["page"]["w"] + 6, SPEC["page"]["h"] + 6)
         else:
