@@ -1,4 +1,5 @@
 // Photo acquisition (file / camera frame) and hand-off to the vision worker.
+import { collectRun } from './collect.ts';
 import { getState, setState, uid, type Shot } from './store.ts';
 import { VisionClient } from '../vision/client.ts';
 import type { PipelineResult, RGBAImage } from '../vision/types.ts';
@@ -74,6 +75,20 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
       confidence: z.confidence,
       warnings: z.messages.map((m) => m.text),
     });
+  }
+  if (st.collect.on) {
+    try {
+      const c = await collectRun(result, st.collect.series, st.collect.reference);
+      setState((s) => ({ collect: { ...s.collect, reference: c.reference, count: s.collect.count + c.stored } }));
+      if (c.moved.length)
+        result.warnings.push({
+          code: 'MOVED',
+          text: `Collecte : verre ${c.moved.join(' et ')} déplacé depuis la photo de référence.`,
+          tip: 'Démarrez une nouvelle série (Aide → Collecte) avant de reprendre une référence.',
+        });
+    } catch (e) {
+      result.warnings.push({ code: 'COLLECT', text: `Collecte impossible : ${String(e)}` });
+    }
   }
   setState((s) => ({
     shots: [...s.shots, ...shots],

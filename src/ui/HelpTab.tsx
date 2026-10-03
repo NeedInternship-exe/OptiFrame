@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { fmt } from '../core/measure.ts';
 import { download } from '../export/svg.ts';
 import { IconDownload, IconSun } from './icons.tsx';
+import { allSamples, clearSamples } from './collect.ts';
 import { DEFAULT_SETTINGS, getState, setState, shotLens, useStore, type Settings } from './store.ts';
 
 const BASE = import.meta.env.BASE_URL;
@@ -125,6 +126,52 @@ export function HelpTab({ onLightbox }: { onLightbox: () => void }) {
             Réinitialiser
           </button>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Collecte de données réelles (capture appariée)</h2>
+        <p class="small">
+          Pour entraîner l’IA sur de vraies photos sans rien annoter : <b>1.</b> photo de référence des verres sur la boîte lumineuse (bord net) ; <b>2.</b> sans bouger les verres, autres photos en conditions difficiles (lumière de la pièce,
+          reflets, autre angle). Le contour de référence sert d’étiquette exacte pour ces photos, car toutes sont redressées en millimètres du tapis.
+        </p>
+        <label class="toggle">
+          <input type="checkbox" checked={st.collect.on} onChange={(e) => setState({ collect: { ...st.collect, on: (e.target as HTMLInputElement).checked } })} />
+          <span>Mode collecte</span>
+        </label>
+        {st.collect.on && (
+          <p class="muted small">
+            Série <b>{st.collect.series}</b> · référence OD {st.collect.reference.OD ? '✓' : '—'} · OS {st.collect.reference.OS ? '✓' : '—'} · {st.collect.count} image{st.collect.count > 1 ? 's' : ''} enregistrée{st.collect.count > 1 ? 's' : ''}
+            {!st.collect.reference.OD && !st.collect.reference.OS && ' — la prochaine photo sera la référence (boîte lumineuse).'}
+          </p>
+        )}
+        <div class="row-actions">
+          <button
+            class="btn"
+            disabled={!st.collect.on}
+            onClick={() => setState({ collect: { ...st.collect, series: `s${Number(st.collect.series.slice(1) || 0) + 1}`, reference: {} } })}
+          >
+            Nouvelle série (verres déplacés)
+          </button>
+          <button
+            class="btn"
+            disabled={!st.collect.count}
+            onClick={async () => download('optiframe-collecte.json', JSON.stringify({ version: 1, samples: await allSamples() }), 'application/json')}
+          >
+            <IconDownload /> Exporter le jeu (JSON)
+          </button>
+          <button
+            class="btn ghost danger"
+            disabled={!st.collect.count}
+            onClick={async () => {
+              if (!confirm('Effacer les images collectées ?')) return;
+              await clearSamples();
+              setState({ collect: { ...st.collect, count: 0, reference: {} } });
+            }}
+          >
+            Effacer
+          </button>
+        </div>
+        <p class="muted small">Conversion pour l’entraînement : <code>ml/import_real.py</code> (voir ml/README.md).</p>
       </section>
 
       <section class="card">

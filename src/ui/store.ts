@@ -56,6 +56,13 @@ export interface FrameSummary {
 
 export type Use = 'latest' | 'fusion' | string;
 
+export interface Collect {
+  on: boolean;
+  series: string;
+  reference: Partial<Record<Eye, Poly>>;
+  count: number;
+}
+
 export interface State {
   tab: Tab;
   settings: Settings;
@@ -66,11 +73,12 @@ export interface State {
   last: LastRun | null;
   engine: EngineStatus;
   onboarded: boolean;
+  collect: Collect;
 }
 
 export const DEFAULT_SETTINGS: Settings = { useModel: true, refine: true, align: true, edgeHeight: 1.0, printScale: 1, bias: 0 };
 const KEY = 'optiframe:v1';
-const PERSIST: (keyof State)[] = ['settings', 'shots', 'use', 'frame', 'onboarded'];
+const PERSIST: (keyof State)[] = ['settings', 'shots', 'use', 'frame', 'onboarded', 'collect'];
 
 function load(): State {
   const base: State = {
@@ -83,6 +91,7 @@ function load(): State {
     last: null,
     engine: { state: 'loading', opencv: 0, model: 0, modelReady: false },
     onboarded: false,
+    collect: { on: false, series: 's1', reference: {}, count: 0 },
   };
   try {
     const raw = localStorage.getItem(KEY);

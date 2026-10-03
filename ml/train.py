@@ -1,6 +1,8 @@
 """Train the OptiFrame lens segmentation model (tiny U-Net) on synthetic data.
 
     python train.py --steps 14000 --out runs/v1
+    # fine-tune with real photos collected in the app (paired capture):
+    python train.py --steps 3000 --lr 5e-4 --resume runs/v1/best.pt --real real/ --out runs/v1-real
 
 Input : RGB float32 in [0, 1], NCHW, rectified top view at 3 px/mm, any H, W
         multiple of 32 (fully convolutional).
@@ -22,6 +24,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from dataset import make_sample
+from lenssynth import camera_effects
 
 PPM = 3.0
 
@@ -69,16 +72,47 @@ def worker_init(_):
     cv2.setNumThreads(1)
 
 
+class RealLenses:
+    """Real rectified photos labelled by paired capture (see import_real.py)."""
+
+    def __init__(self, folder):
+        self.items = sorted(p for p in Path(folder).glob("*.png") if not p.name.endswith("_mask.png"))
+        if not self.items:
+            raise SystemExit(f"no real samples in {folder}")
+
+    def sample(self, rng, size):
+        p = self.items[rng.integers(len(self.items))]
+        img = cv2.imread(str(p))[..., ::-1]
+        lab = cv2.imread(str(p.with_name(p.stem + "_mask.png")), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+        h, w = lab.shape
+        if h < size or w < size:  # pad by replication (the network was trained on that border too)
+            ph, pw = max(0, size - h), max(0, size - w)
+            img = cv2.copyMakeBorder(np.ascontiguousarray(img), 0, ph, 0, pw, cv2.BORDER_REPLICATE)
+            lab = cv2.copyMakeBorder(lab, 0, ph, 0, pw, cv2.BORDER_REPLICATE)
+            h, w = lab.shape
+        y0, x0 = rng.integers(0, h - size + 1), rng.integers(0, w - size + 1)
+        img, lab = img[y0 : y0 + size, x0 : x0 + size], lab[y0 : y0 + size, x0 : x0 + size]
+        if rng.random() < 0.5:
+            img, lab = img[:, ::-1], lab[:, ::-1]
+        img = camera_effects(rng, np.ascontiguousarray(img).astype(np.float32) / 255, strength=0.5)
+        return img, np.ascontiguousarray(lab)
+
+
 class SynthLenses(Dataset):
-    def __init__(self, n, base_seed, size=256):
+    def __init__(self, n, base_seed, size=256, real=None, real_frac=0.0):
         self.n, self.base, self.size = n, base_seed, size
+        self.real, self.real_frac = real, real_frac
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
-        img, lab = make_sample(self.base + i, self.size)
-        x = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+        rng = np.random.default_rng(700_000_000 + self.base + i)
+        if self.real is not None and rng.random() < self.real_frac:
+            img, lab = self.real.sample(rng, self.size)
+        else:
+            img, lab = make_sample(self.base + i, self.size)
+        x = torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1).float() / 255.0
         y = torch.from_numpy(lab)[None]
         return x, y
 
@@ -151,6 +185,8 @@ def main():
     ap.add_argument("--workers", type=int, default=9)
     ap.add_argument("--out", default="runs/v1")
     ap.add_argument("--resume", default="")
+    ap.add_argument("--real", default="", help="folder from import_real.py (fine-tuning on real photos)")
+    ap.add_argument("--real-frac", type=float, default=0.3)
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -163,7 +199,10 @@ def main():
     nparams = sum(p.numel() for p in model.parameters())
     print(f"params: {nparams / 1e3:.0f} k  device: {device}", flush=True)
 
-    train = SynthLenses(args.steps * args.bs, base_seed=0)
+    real = RealLenses(args.real) if args.real else None
+    if real:
+        print(f"real samples: {len(real.items)} (fraction {args.real_frac})", flush=True)
+    train = SynthLenses(args.steps * args.bs, base_seed=0, real=real, real_frac=args.real_frac)
     val = SynthLenses(512, base_seed=10_000_000)
     tl = DataLoader(train, args.bs, shuffle=False, num_workers=args.workers, persistent_workers=True, prefetch_factor=4, worker_init_fn=worker_init)
     vl = DataLoader(val, 32, num_workers=args.workers, worker_init_fn=worker_init)
