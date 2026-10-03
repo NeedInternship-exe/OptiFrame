@@ -5,7 +5,7 @@ recyclé posé sur un tapis imprimé, l’app mesure son contour au dixième de 
 monture sur mesure **prête à imprimer en 3D**, même quand le verre gauche et le verre droit n’ont pas
 la même forme.
 
-**➡️ App : https://m-azaiez.github.io/OptiFrame/** · aucun compte, aucune installation, fonctionne hors ligne après la 1re ouverture.
+**➡️ App : https://needinternship-exe.github.io/OptiFrame/** · aucun compte, aucune installation, fonctionne hors ligne après la 1re ouverture.
 
 <p align="center"><img src="docs/qr-optiframe.png" width="180" alt="QR code de l’application"></p>
 

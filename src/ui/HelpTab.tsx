@@ -6,7 +6,7 @@ import { IconDownload, IconSun } from './icons.tsx';
 import { DEFAULT_SETTINGS, getState, setState, shotLens, useStore, type Settings } from './store.ts';
 
 const BASE = import.meta.env.BASE_URL;
-export const REPO_URL = 'https://github.com/m-azaiez/OptiFrame';
+export const REPO_URL = 'https://github.com/NeedInternship-exe/OptiFrame';
 
 function QR() {
   const ref = useRef<HTMLCanvasElement>(null);
