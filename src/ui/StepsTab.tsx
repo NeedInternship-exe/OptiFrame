@@ -92,14 +92,16 @@ export function StepsTab() {
   return (
     <div class="tab">
       <section class="card">
-        <h2>1 · Photo et repères ArUco</h2>
-        {last.photo && <Canvas deps={[last]} draw={(c, w) => drawPhoto(c, last.photo!, r.image.width, r.image.height, r.markers, w)} />}
+        <h2>1 · Photo et référence ({r.reference?.label ?? 'non trouvée'})</h2>
+        {last.photo && <Canvas deps={[last]} draw={(c, w) => drawPhoto(c, last.photo!, r.image.width, r.image.height, r.markers, w, r.reference?.corners)} />}
         <p class="small">
-          {r.markers.length} repères détectés sur une photo de {r.image.width} × {r.image.height} px. Chaque coin est affiné au dixième de pixel en ajustant une droite sur les 4 bords de chaque repère (vert = affiné).
+          {r.reference?.kind === 'sheet'
+            ? `Feuille blanche trouvée sur une photo de ${r.image.width} × ${r.image.height} px. Chaque bord est retrouvé par ajustement de droite sur ~60 profils de gradient (d’abord large, puis sub-pixel en pleine résolution) ; le format (Lettre ou A4) et l’orientation sont choisis par cohérence géométrique avec une vraie caméra.`
+            : `${r.markers.length} repères détectés sur une photo de ${r.image.width} × ${r.image.height} px. Chaque coin est affiné au dixième de pixel en ajustant une droite sur les 4 bords de chaque repère (vert = affiné).`}
         </p>
         {q && (
           <ul class="kv">
-            <li>
+            <li hidden={!Number.isFinite(q.reprojPx)}>
               <span>Erreur de reprojection (homographie)</span>
               <b>
                 {fmt(q.reprojPx, 2)} px = {fmt(q.reprojMm, 3)} mm
@@ -123,16 +125,20 @@ export function StepsTab() {
         )}
       </section>
 
+      {zones
+        .filter((z, i) => zones.findIndex((y) => y.view === z.view) === i)
+        .map((z) => (
+          <section class="card">
+            <h2>2 · Vue de dessus redressée{r.reference?.kind === 'sheet' ? '' : ` — zone ${z.zone}`}</h2>
+            <RectifiedView z={z} />
+            <p class="small">L’homographie ramène la zone dans le plan de la feuille : 6 px/mm, grille de 10 mm. La perspective est corrigée, l’échelle est la même partout.</p>
+          </section>
+        ))}
       {zones.map((z) => (
         <>
-          <section class="card">
-            <h2>2 · Vue de dessus redressée — zone {z.zone}</h2>
-            <RectifiedView z={z} />
-            <p class="small">L’homographie ramène la zone dans le plan du tapis : 6 px/mm, grille de 10 mm. La perspective est corrigée, l’échelle est la même partout.</p>
-          </section>
           {z.prob && z.contour && (
             <section class="card">
-              <h2>3 · Segmentation {z.method === 'ai' ? 'par l’IA' : 'classique'}</h2>
+              <h2>3 · Segmentation {z.method === 'ai' ? 'par l’IA' : 'classique'} — {EYE_LABEL[z.zone]}</h2>
               <Canvas deps={[z]} draw={(c, w) => drawProb(c, z.prob!, z.contour!, w)} />
               <p class="small">
                 {z.method === 'ai'

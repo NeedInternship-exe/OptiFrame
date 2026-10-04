@@ -96,12 +96,13 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
       post({ type: 'live', id: msg.id, result: detectLive(engine.cv, msg.image) });
     } else if (msg.type === 'process') {
       const result = await processPhoto(engine, msg.image, msg.opts, (stage) => post({ type: 'stage', id: msg.id, stage }));
-      const transfer: Transferable[] = [];
+      // two lenses found on one sheet share the same images: transfer each buffer once
+      const transfer = new Set<Transferable>();
       for (const z of result.zones) {
-        if (z.view) transfer.push(z.view.data.buffer);
-        if (z.prob) transfer.push(z.prob.data.buffer);
+        if (z.view) transfer.add(z.view.data.buffer as ArrayBuffer);
+        if (z.prob) transfer.add(z.prob.data.buffer as ArrayBuffer);
       }
-      post({ type: 'result', id: msg.id, result }, transfer);
+      post({ type: 'result', id: msg.id, result }, [...transfer]);
     }
   } catch (e) {
     post({ type: 'error', id: msg.id, error: String(e) });

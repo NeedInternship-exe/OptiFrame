@@ -1,7 +1,7 @@
 # OptiFrame — des verres recyclés à la monture imprimée en 3D
 
 Web app mobile (défi CodeML × Santé Numérique Sans Frontières) : on photographie un verre de lunettes
-recyclé posé sur un tapis imprimé, l’app mesure son contour au dixième de millimètre et génère une
+recyclé posé sur **une simple feuille blanche** (ou sur notre tapis imprimé, plus précis), l’app mesure son contour au dixième de millimètre et génère une
 monture sur mesure **prête à imprimer en 3D**, même quand le verre gauche et le verre droit n’ont pas
 la même forme.
 
@@ -21,35 +21,46 @@ la même forme.
 ## 1. Tester en 30 secondes
 
 1. Scanner le QR code (Chrome Android ou Safari iOS).
-2. Pas de tapis sous la main ? **« Essayer avec une photo d’exemple »** lance tout le traitement sur une photo de démonstration (synthétique).
-3. Avec le kit : imprimer le [tapis A4](public/mat/optiframe-mat-A4.pdf), poser les verres, **Photographier**.
-4. Onglet **Monture** → **Télécharger monture.stl**. Onglet **Mesurer** → **Contours SVG 1:1** (à imprimer pour poser le verre sur son tracé).
+2. Rien sous la main ? **« Essayer avec une photo d’exemple »** lance tout le traitement sur une photo de démonstration (synthétique).
+3. **Sans rien imprimer** : une feuille blanche Lettre ou A4 sur une table foncée, les verres dessus, **Photographier** (les 4 coins de la feuille visibles).
+4. Plus précis : le tapis imprimé ([Lettre](public/mat/optiframe-mat-lettre.pdf) ou [A4](public/mat/optiframe-mat-A4.pdf)), idéalement posé sur une boîte lumineuse.
+5. Onglet **Monture** → **Télécharger monture.stl**. Onglet **Mesurer** → **Contours SVG 1:1** (à imprimer pour poser le verre sur son tracé).
 
 ## 2. Dispositif de capture (remontable en moins d’une minute)
 
+**Option 1 : une feuille blanche, rien à imprimer.** Une feuille Lettre ou A4 a une taille connue. Ses 4 coins suffisent pour l’échelle et la perspective (la feuille A4 est citée dans les consignes comme objet de référence).
+- Posez la feuille à plat sur une table plus foncée que le papier, puis les verres face bombée vers le haut, à plus de 1 cm des bords. Le verre de gauche est le verre droit (OD).
+- L’app trouve la feuille, puis ajuste une droite sur chaque bord, d’abord avec une recherche large qui récupère un coin assombri par une ombre, puis au sous-pixel en pleine résolution.
+- Le format (Lettre ou A4) et l’orientation sont choisis automatiquement par **cohérence géométrique** : avec le bon format, l’homographie correspond à une vraie caméra (axes orthogonaux et de même norme).
+- Le haut de la photo définit le haut des verres : on tient le téléphone droit.
+
+**Option 2 : le tapis imprimé, plus précis et robuste.**
+
 ![tapis](docs/mat-preview.png)
 
-- **Une feuille A4 imprimée à 100 %** ([PDF](public/mat/optiframe-mat-A4.pdf)) : 8 marqueurs ArUco (`DICT_4X4_50`, 24 mm) autour de deux zones,
+- **Une feuille imprimée à 100 %**, [Lettre](public/mat/optiframe-mat-lettre.pdf) ou [A4](public/mat/optiframe-mat-A4.pdf). Le même tapis tient sur les deux papiers, car il est dessiné sur leur intersection (279,4 × 210 mm). Il porte 8 marqueurs ArUco (`DICT_4X4_50`, 24 mm) autour de deux zones :
   **OD** (verre droit, à gauche comme sur des lunettes vues de face) et **OS** (verre gauche). Une **règle de 100 mm** permet de vérifier l’échelle d’impression ;
   si l’imprimante a réduit la page, on saisit la longueur réelle dans *Aide → Réglages* et toutes les mesures sont corrigées.
-- **Le verre est posé face bombée vers le haut** : son bord touche le papier, il est donc dans le plan des marqueurs (pas d’erreur d’échelle).
-  Le bord reste un peu au-dessus du papier : l’app corrige cette **parallaxe** à partir de la position de la caméra retrouvée par l’homographie.
-- **Boîte lumineuse (optionnel, recommandé)** : poser le tapis sur l’écran d’un portable affichant du blanc (bouton *Boîte lumineuse* dans l’app). Le papier devient translucide, le bord du verre ressort en noir très net.
-- **Une seule photo peut mesurer les deux verres** (zones OD + OS), téléphone à plat à ~25 cm. Au moins 3 repères suffisent : on peut aussi cadrer une seule zone, de plus près.
+- **Boîte lumineuse (recommandée)** : poser le tapis sur l’écran d’un portable affichant du blanc (bouton *Boîte lumineuse* dans l’app). Le papier devient translucide et le bord du verre ressort en noir très net.
+- Au moins 3 repères suffisent : on peut cadrer les deux zones à la fois ou une seule, de plus près.
+
+**Dans les deux cas**, le verre est posé face bombée vers le haut : son bord touche le papier, il est donc dans le plan de référence.
+Le bord reste un peu au-dessus du papier : l’app corrige cette **parallaxe** à partir de la position de la caméra retrouvée par l’homographie.
 
 ## 3. Comment ça marche
 
 Tout le traitement tourne **dans le navigateur** (Web Workers, WebAssembly) : pas de serveur, les photos ne quittent pas le téléphone.
 
 ```
-photo ─► 1. Repères ArUco ─► 2. Homographie ─► 3. Vue de dessus ─► 4. Segmentation IA ─► 5. Contour sub-pixel ─► mesures
-          OpenCV.js +         mm ↔ px,          6 px/mm (contrôle)   U-Net, ONNX Runtime    recalage sur la photo     A, B, périmètre,
-          affinage maison     32 coins, RANSAC   3 px/mm (IA)         Web (wasm)             d'origine + parallaxe     ED, SVG 1:1
+photo ─► 1. Référence ──► 2. Homographie ─► 3. Vue de dessus ─► 4. Segmentation IA ─► 5. Contour sub-pixel ─► mesures
+          ArUco (tapis)       mm ↔ px            6 px/mm (contrôle)   U-Net, ONNX Runtime    recalage sur la photo     A, B, périmètre,
+          ou 4 coins de       (32 ou 4 coins)    3 px/mm (IA)         Web (wasm)             d'origine + parallaxe     ED, SVG 1:1
+          la feuille
                                                                                                     │
                                                     monture.stl ◄─ 6. CAO paramétrique (manifold-3d) ◄┘
 ```
 
-1. **Repères** — OpenCV.js détecte les marqueurs sur une copie réduite (rapide), puis chaque coin est **ré-estimé en pleine résolution
+1. **Référence** — sans tapis, la feuille blanche est détectée et ses bords ajustés (voir plus haut). Avec le tapis, OpenCV.js détecte les marqueurs sur une copie réduite (rapide), puis chaque coin est **ré-estimé en pleine résolution
    en ajustant une droite sur les 4 bords de chaque marqueur** (~30 profils de gradient sub-pixel par bord, rejet des aberrants), puis intersection.
    Utiliser des bords entiers plutôt que des pixels de coin rend l’homographie bien plus stable. La largeur de transition des bords donne une **mesure de netteté en mm**.
 2. **Homographie** — jusqu’à 32 correspondances mm ↔ px, RANSAC puis moindres carrés. Indicateurs affichés : erreur de reprojection (typiquement < 0,02 mm), résolution (px/mm), inclinaison et hauteur de la caméra.
@@ -123,7 +134,7 @@ Générée par [`src/frame/frame.ts`](src/frame/frame.ts) avec **manifold-3d**, 
 ## 7. Limites connues (honnêtement)
 
 - **Modèle entraîné uniquement sur des images synthétiques.** Les photos réelles peuvent présenter des effets non simulés. Le banc d’essai mesure la précision sur des photos synthétiques : il faut **valider sur de vrais verres au pied à coulisse** (protocole intégré à l’app) et compléter avec des photos réelles annotées (voir `ml/README.md`, « capture appariée »).
-- **L’échelle dépend de l’impression du tapis.** Contrôler la règle de 100 mm (correction possible dans l’app).
+- **L’échelle dépend de la référence.** Avec le tapis, contrôler la règle de 100 mm (correction possible dans l’app). Avec une feuille blanche, la précision dépend de la coupe du papier (±0,5 mm sur 280 mm, soit environ 0,1 mm sur un verre) et de sa planéité. La feuille doit contraster avec la table.
 - **Hauteur du bord pour la parallaxe** : la valeur par défaut est de 1 mm. Une erreur de 1 mm sur cette hauteur produit environ 0,1 à 0,2 mm d’erreur sur A.
 - **Orientation du verre** : A et B dépendent de l’orientation horizontale du verre. Il faut poser le verre droit ; l’app ne corrige que ±8°.
 - **Lunettes complètes (verres montés)** : non prises en charge, la monture surélève les verres. Il faut des verres démontés.

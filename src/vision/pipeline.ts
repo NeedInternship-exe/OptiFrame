@@ -1,8 +1,10 @@
 // Photo -> lens contours in millimetres.
 //
-//  1. ArUco markers (downscaled detection + full-res line-fit refinement)
-//  2. Homography mat-mm -> image-px from every marker corner (RANSAC + LSQ)
-//  3. For each fully visible zone: rectified top view (6 and 3 px/mm)
+//  1. Reference: printed ArUco mat (preferred) or, without printing, a blank
+//     Letter / A4 sheet whose 4 corners are found on a darker table
+//  2. Homography reference-mm -> image-px (markers: RANSAC + LSQ on up to 32
+//     corners; sheet: 4 line-fitted corners, format chosen by consistency)
+//  3. Rectified top view of each region (6 and 3 px/mm)
 //  4. Segmentation (AI model, classical fallback) -> sub-pixel outline
 //  5. Edge refinement on the original photo, smoothing
 //  6. Parallax / print-scale / bias corrections
@@ -12,10 +14,10 @@
 import { offsetNormal, centroid, type Vec2 } from '../core/geom.ts';
 import { applyH, cameraPose, correctParallax, localScale, mul3, type Mat3 } from '../core/homography.ts';
 import { MAT, MARKER_BY_ID, type Eye } from '../core/mat.ts';
-import { detectMarkers, refineMarker, type Gray } from './aruco.ts';
+import { detectMarkers, detectSheet, orderQuad, refineMarker, refineSheet, type Gray } from './aruco.ts';
 import { M } from './messages.ts';
 import { refineContour } from './refine.ts';
-import { classicSegment, modelSegment, probToContour, smoothContour, type ModelRunner } from './segment.ts';
+import { classicSegment, modelSegment, probToContour, smoothContour, type ContourResult, type ModelRunner } from './segment.ts';
 import {
   PPM_MODEL,
   PPM_VIEW,
@@ -26,6 +28,7 @@ import {
   type Msg,
   type PipelineOptions,
   type PipelineResult,
+  type Reference,
   type RGBAImage,
   type ZoneResult,
 } from './types.ts';
@@ -34,11 +37,27 @@ import {
 type CV = any;
 
 const DETECT_MAX_SIDE = 1600;
+const SHEET_INSET = 6; // mm of the sheet border that is not searched (shadows, table)
+export const SHEETS = {
+  letter: { w: 215.9, h: 279.4, label: 'feuille Lettre' },
+  a4: { w: 210, h: 297, label: 'feuille A4' },
+} as const;
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export interface Engine {
   cv: CV;
   model?: ModelRunner | null;
+}
+
+/** A rectangle of the reference (mm) that is searched for lenses. */
+interface Region {
+  name: string;
+  x0: number;
+  y0: number;
+  w: number;
+  h: number;
+  eye?: Eye; // mat zones have a fixed eye; on a sheet it follows the position
+  maxLenses: number;
 }
 
 function matToArray(m: any): number[] {
@@ -47,7 +66,7 @@ function matToArray(m: any): number[] {
   return out;
 }
 
-/** Downscaled grey copy for marker detection; returns the scale factor. */
+/** Downscaled grey copy for detection; returns the scale factor. */
 function detectionImage(cv: CV, gray: any): { img: any; s: number } {
   const maxSide = Math.max(gray.cols, gray.rows);
   if (maxSide <= DETECT_MAX_SIDE) return { img: gray.clone(), s: 1 };
@@ -106,13 +125,60 @@ function fitHomography(cv: CV, markers: MarkerDet[]): { H: Mat3; residPx: number
   }
 }
 
-function zoneRect(zone: Eye) {
-  const z = MAT.zones[zone];
-  return { x0: z.x - ZONE_MARGIN, y0: z.y - ZONE_MARGIN, w: z.w + 2 * ZONE_MARGIN, h: z.h + 2 * ZONE_MARGIN };
+/** Exact homography from 4 point pairs (mm -> px). */
+function homography4(cv: CV, mm: Vec2[], px: Vec2[]): Mat3 {
+  const a = cv.matFromArray(4, 1, cv.CV_32FC2, mm.flat());
+  const b = cv.matFromArray(4, 1, cv.CV_32FC2, px.flat());
+  const Hm = cv.getPerspectiveTransform(a, b);
+  const H = matToArray(Hm);
+  a.delete(), b.delete(), Hm.delete();
+  return H;
 }
 
-function zoneVisible(H: Mat3, zone: Eye, W: number, Hh: number): boolean {
-  const r = zoneRect(zone);
+/**
+ * How well a homography matches a real camera looking at a rectangle of that
+ * size: with the right page format and orientation, the first two rotation
+ * columns are orthogonal and of equal length.
+ */
+function consistency(H: Mat3, imgW: number, imgH: number): number {
+  const f = (26 / 43.27) * Math.hypot(imgW, imgH);
+  const cx = imgW / 2 - 0.5, cy = imgH / 2 - 0.5;
+  const col = (j: number) => [(H[j] - cx * H[6 + j]) / f, (H[3 + j] - cy * H[6 + j]) / f, H[6 + j]];
+  const m1 = col(0), m2 = col(1);
+  const n1 = Math.hypot(...m1), n2 = Math.hypot(...m2);
+  const cos = Math.abs(m1[0] * m2[0] + m1[1] * m2[1] + m1[2] * m2[2]) / (n1 * n2);
+  return cos + Math.abs(n1 - n2) / ((n1 + n2) / 2);
+}
+
+/** Sheet corners (image px, clockwise from top-left) -> best page format/orientation. */
+function sheetLayout(cv: CV, corners: Vec2[], imgW: number, imgH: number, fmt: PipelineOptions['sheetFormat']) {
+  const formats = fmt === 'auto' ? (['letter', 'a4'] as const) : ([fmt] as const);
+  let best: { H: Mat3; w: number; h: number; label: string; score: number } | null = null;
+  for (const f of formats) {
+    const S = SHEETS[f];
+    for (const [w, h] of [
+      [S.w, S.h],
+      [S.h, S.w],
+    ]) {
+      // the photo defines "up": corner 0 (top-left in the image) is the origin
+      const H = homography4(cv, [[0, 0], [w, 0], [w, h], [0, h]], corners);
+      const score = consistency(H, imgW, imgH);
+      if (!best || score < best.score) best = { H, w, h, label: S.label, score };
+    }
+  }
+  return best!;
+}
+
+function matRegions(H: Mat3, W: number, Hh: number): Region[] {
+  return (['OD', 'OS'] as Eye[])
+    .map((z) => {
+      const zs = MAT.zones[z];
+      return { name: z, eye: z, x0: zs.x - ZONE_MARGIN, y0: zs.y - ZONE_MARGIN, w: zs.w + 2 * ZONE_MARGIN, h: zs.h + 2 * ZONE_MARGIN, maxLenses: 1 };
+    })
+    .filter((r) => regionVisible(H, r, W, Hh));
+}
+
+function regionVisible(H: Mat3, r: Region, W: number, Hh: number): boolean {
   const pts: Vec2[] = [
     [r.x0, r.y0],
     [r.x0 + r.w, r.y0],
@@ -132,18 +198,22 @@ export function detectLive(cv: CV, img: RGBAImage): LiveDetection {
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     const ms = detectMarkers(cv, gray);
-    const res: LiveDetection = {
-      markers: ms.map((m) => ({ id: m.id, corners: m.corners.map(([x, y]) => [x / img.width, y / img.height] as Vec2) })),
-      zonesVisible: [],
-    };
+    const norm = (c: Vec2[]) => c.map(([x, y]) => [x / img.width, y / img.height] as Vec2);
+    const res: LiveDetection = { markers: ms.map((m) => ({ id: m.id, corners: norm(m.corners) })), zonesVisible: [] };
     if (ms.length >= 3) {
       const fit = fitHomography(
         cv,
         ms.map((m) => ({ ...m, refined: false, edgeSpreadPx: NaN })),
       );
       if (fit) {
-        res.zonesVisible = (['OD', 'OS'] as Eye[]).filter((z) => zoneVisible(fit.H, z, img.width, img.height));
+        res.zonesVisible = matRegions(fit.H, img.width, img.height).map((r) => r.eye!);
         res.tiltDeg = cameraPose(fit.H, img.width, img.height).tiltDeg;
+      }
+    } else {
+      const q = detectSheet(cv, gray);
+      if (q) {
+        res.sheet = norm(q);
+        res.tiltDeg = cameraPose(sheetLayout(cv, q, img.width, img.height, 'auto').H, img.width, img.height).tiltDeg;
       }
     }
     return res;
@@ -198,29 +268,47 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
     res.markers = raw.map((m) => refineMarker(g, m.id, m.corners));
     lap('markers', t);
 
-    if (res.markers.length === 0) return (res.errors.push(M.noMarkers()), res);
-    if (res.markers.length < 3) return (res.errors.push(M.fewMarkers(res.markers.length)), res);
-
+    // ---- reference: printed mat, else blank sheet
+    let H: Mat3, regions: Region[], ref: Reference, reprojPx = NaN, spreadPx = NaN;
     t = now();
-    const fit = fitHomography(cv, res.markers);
-    if (!fit) return (res.errors.push(M.noMarkers()), res);
-    const H = fit.H;
+    if (res.markers.length >= 3) {
+      const fit = fitHomography(cv, res.markers);
+      if (!fit) return (res.errors.push(M.noMarkers()), res);
+      H = fit.H;
+      const inl = fit.residPx.filter((_, i) => fit.inliers[i]);
+      reprojPx = Math.sqrt(inl.reduce((s, r) => s + r * r, 0) / Math.max(1, inl.length));
+      const spreads = res.markers.map((m) => m.edgeSpreadPx).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+      spreadPx = spreads.length ? spreads[Math.floor(spreads.length / 2)] : NaN;
+      ref = { kind: 'mat', label: 'tapis OptiFrame', w: MAT.page.w, h: MAT.page.h };
+      regions = matRegions(H, img.width, img.height);
+      if (!regions.length) return (res.errors.push(M.noZone()), res);
+    } else {
+      let q0 = detectSheet(cv, det.img);
+      if (!q0) return (res.errors.push(res.markers.length ? M.fewMarkers(res.markers.length) : M.noMarkers()), res);
+      // wide edge search on the small image, then fine line fit at full resolution
+      const gd: Gray = { data: new Uint8Array(det.img.data), width: det.img.cols, height: det.img.rows };
+      q0 = refineSheet(gd, q0, true).corners;
+      const rq = refineSheet(g, q0.map((p) => unscale(p, det.s)));
+      const corners = orderQuad(rq.corners);
+      const lay = sheetLayout(cv, corners, img.width, img.height, opts.sheetFormat);
+      H = lay.H;
+      spreadPx = rq.spread;
+      ref = { kind: 'sheet', label: lay.label, w: lay.w, h: lay.h, corners };
+      regions = [{ name: 'sheet', x0: SHEET_INSET, y0: SHEET_INSET, w: lay.w - 2 * SHEET_INSET, h: lay.h - 2 * SHEET_INSET, maxLenses: 2 }];
+      res.warnings.push(M.sheetInfo(lay.label));
+    }
     res.H = H;
+    res.reference = ref;
     lap('homography', t);
 
     // ---- quality
-    const cx = MAT.page.w / 2, cy = MAT.page.h / 2;
-    const pxPerMm = localScale(H, cx, cy);
-    const inl = fit.residPx.filter((_, i) => fit.inliers[i]);
-    const rms = Math.sqrt(inl.reduce((s, r) => s + r * r, 0) / Math.max(1, inl.length));
-    const spreads = res.markers.map((m) => m.edgeSpreadPx).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
-    const spreadPx = spreads.length ? spreads[Math.floor(spreads.length / 2)] : NaN;
+    const pxPerMm = localScale(H, ref.w / 2, ref.h / 2);
     const pose = cameraPose(H, img.width, img.height);
     res.pose = pose;
     res.quality = {
       nMarkers: res.markers.length,
-      reprojPx: rms,
-      reprojMm: rms / pxPerMm,
+      reprojPx,
+      reprojMm: reprojPx / pxPerMm,
       pxPerMm,
       blurMm: spreadPx / pxPerMm,
       tiltDeg: pose.tiltDeg,
@@ -233,10 +321,8 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
     if (q.tiltDeg > 40) res.warnings.push(M.tilted(q.tiltDeg));
 
     // ---- rectification source: downscale so that warping does not alias
-    const zones = (['OD', 'OS'] as Eye[]).filter((z) => zoneVisible(H, z, img.width, img.height));
-    if (!zones.length) return (res.errors.push(M.noZone()), res);
     t = now();
-    const srcPpm = Math.min(...zones.map((z) => localScale(H, MAT.zones[z].x + MAT.zones[z].w / 2, MAT.zones[z].y + MAT.zones[z].h / 2)));
+    const srcPpm = Math.min(...regions.map((r) => localScale(H, r.x0 + r.w / 2, r.y0 + r.h / 2)));
     const s = Math.min(1, (PPM_VIEW * 1.5) / srcPpm);
     let warpSrc = src;
     let Hs = H;
@@ -247,78 +333,101 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
     }
     lap('downscale', t);
 
-    let anyLens = false;
-    for (const zone of zones) {
-      const zr = zoneRect(zone);
-      const zres: ZoneResult = { zone, status: 'empty', messages: [], method: 'ai' };
-      res.zones.push(zres);
+    for (const zr of regions) {
       onStage?.('rectify');
       t = now();
       const W6 = Math.round(zr.w * PPM_VIEW), H6 = Math.round(zr.h * PPM_VIEW);
       const S6 = [1 / PPM_VIEW, 0, zr.x0 + 0.5 / PPM_VIEW, 0, 1 / PPM_VIEW, zr.y0 + 0.5 / PPM_VIEW, 0, 0, 1];
-      const Mw = mul3(Hs, S6);
-      const MwM = track(cv.matFromArray(3, 3, cv.CV_64F, Mw));
+      const MwM = track(cv.matFromArray(3, 3, cv.CV_64F, mul3(Hs, S6)));
       const view = track(new cv.Mat());
       cv.warpPerspective(warpSrc, view, MwM, new cv.Size(W6, H6), cv.INTER_LINEAR | cv.WARP_INVERSE_MAP, cv.BORDER_REPLICATE);
       const small = track(new cv.Mat());
       const W3 = Math.round(W6 * (PPM_MODEL / PPM_VIEW)), H3 = Math.round(H6 * (PPM_MODEL / PPM_VIEW));
       cv.resize(view, small, new cv.Size(W3, H3), 0, 0, cv.INTER_AREA);
-      lap(`rectify_${zone}`, t);
+      lap(`rectify_${zr.name}`, t);
 
       onStage?.('segment');
       t = now();
       let prob: Float32Array;
+      let method: ZoneResult['method'] = 'ai';
       if (opts.useModel && engine.model) {
         prob = await modelSegment(small.data, W3, H3, engine.model);
         res.modelUsed = true;
       } else {
         prob = classicSegment(cv, view);
-        zres.method = 'classic';
+        method = 'classic';
       }
-      lap(`segment_${zone}`, t);
-      if (opts.debug) {
-        zres.view = patchFromMat(view, PPM_VIEW, zr.x0, zr.y0);
-        zres.prob = probPatch(prob, W3, H3, zr.x0, zr.y0);
-      }
+      lap(`segment_${zr.name}`, t);
+      const viewPatch = opts.debug ? patchFromMat(view, PPM_VIEW, zr.x0, zr.y0) : undefined;
+      const probP = opts.debug ? probPatch(prob, W3, H3, zr.x0, zr.y0) : undefined;
 
       onStage?.('contour');
       t = now();
-      const cr = probToContour(cv, prob, W3, H3, PPM_MODEL, zr.x0, zr.y0);
-      if (!cr) {
-        lap(`contour_${zone}`, t);
-        continue;
+      const found: ContourResult[] = [];
+      for (let rank = 0; rank < zr.maxLenses; rank++) {
+        const cr = probToContour(cv, prob, W3, H3, PPM_MODEL, zr.x0, zr.y0, rank);
+        if (!cr) break;
+        found.push(cr);
       }
-      anyLens = true;
-      zres.status = 'ok';
-      zres.coarse = cr.contour;
-      zres.confidence = cr.confidence;
-      zres.solidity = cr.solidity;
-      let contour = cr.contour;
-      if (opts.refine) {
-        const r = refineContour(g, H, contour);
-        contour = smoothContour(r.contour);
-        zres.refine = r.stats;
-      }
-      // corrections: parallax (edge above the paper), print scale, bias
-      contour = correctParallax(contour, pose, opts.edgeHeight);
-      if (opts.printScale !== 1) {
-        const c = centroid(contour);
-        contour = contour.map(([x, y]) => [c[0] + (x - c[0]) * opts.printScale, c[1] + (y - c[1]) * opts.printScale]);
-      }
-      if (opts.bias) contour = offsetNormal(contour, opts.bias);
-      zres.contour = contour;
-      lap(`contour_${zone}`, t);
+      // eyes: fixed for a mat zone; on a sheet the left lens is OD (front view)
+      const cxOf = (c: ContourResult) => centroid(c.contour)[0];
+      const eyes: Eye[] =
+        zr.eye != null
+          ? found.map(() => zr.eye!)
+          : found.length === 2
+            ? cxOf(found[0]) < cxOf(found[1])
+              ? ['OD', 'OS']
+              : ['OS', 'OD']
+            : found.map((c) => (cxOf(c) < ref.w / 2 ? 'OD' : 'OS'));
+      if (!found.length && zr.eye) res.zones.push({ zone: zr.eye, status: 'empty', messages: [], method, view: viewPatch, prob: probP });
 
-      const msgs: Msg[] = [];
-      const xs = contour.map((p) => p[0]), ys = contour.map((p) => p[1]);
-      const A = Math.max(...xs) - Math.min(...xs), B = Math.max(...ys) - Math.min(...ys);
-      if (cr.touchesBorder) msgs.push(M.lensBorder());
-      if (A < 20 || A > 80 || B < 15 || B > 70) msgs.push(M.lensSize(A, B));
-      if (cr.confidence < 0.6) msgs.push(M.lowConfidence());
-      if (cr.solidity < 0.9) msgs.push(M.irregular());
-      if (msgs.length) zres.status = 'warn';
-      zres.messages = msgs;
+      found.forEach((cr, k) => {
+        const zres: ZoneResult = { zone: eyes[k], status: 'ok', messages: [], method, view: viewPatch, prob: probP };
+        res.zones.push(zres);
+        zres.coarse = cr.contour;
+        zres.confidence = cr.confidence;
+        zres.solidity = cr.solidity;
+        let contour = cr.contour;
+        if (opts.refine) {
+          const r = refineContour(g, H, contour);
+          contour = smoothContour(r.contour);
+          zres.refine = r.stats;
+        }
+        // corrections: parallax (edge above the paper), print scale, bias
+        contour = correctParallax(contour, pose, opts.edgeHeight);
+        if (opts.printScale !== 1) {
+          const c = centroid(contour);
+          contour = contour.map(([x, y]) => [c[0] + (x - c[0]) * opts.printScale, c[1] + (y - c[1]) * opts.printScale]);
+        }
+        if (opts.bias) contour = offsetNormal(contour, opts.bias);
+        zres.contour = contour;
+
+        const msgs: Msg[] = [];
+        const xs = contour.map((p) => p[0]), ys = contour.map((p) => p[1]);
+        const A = Math.max(...xs) - Math.min(...xs), B = Math.max(...ys) - Math.min(...ys);
+        if (cr.touchesBorder) msgs.push(ref.kind === 'sheet' ? M.sheetBorder() : M.lensBorder());
+        if (A < 20 || A > 80 || B < 15 || B > 70) msgs.push(M.lensSize(A, B));
+        if (cr.confidence < 0.6) msgs.push(M.lowConfidence());
+        if (cr.solidity < 0.9) msgs.push(M.irregular());
+        if (msgs.length) zres.status = 'warn';
+        zres.messages = msgs;
+      });
+      lap(`contour_${zr.name}`, t);
     }
+    if (opts.forceEye) {
+      // one photo per lens: keep the largest lens and give it the chosen eye
+      const withLens = res.zones.filter((z) => z.contour);
+      const area = (z: ZoneResult) => {
+        const xs = z.contour!.map((p) => p[0]), ys = z.contour!.map((p) => p[1]);
+        return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+      };
+      const keep = withLens.sort((a, b) => area(b) - area(a))[0];
+      res.zones = keep ? [{ ...keep, zone: opts.forceEye }] : res.zones.filter((z) => !z.contour).slice(0, 1);
+      if (withLens.length > 1) res.warnings.push(M.severalLenses(opts.forceEye));
+    }
+    // keep the result order stable: OD, OS
+    res.zones.sort((a, b) => (a.zone === b.zone ? 0 : a.zone === 'OD' ? -1 : 1));
+    const anyLens = res.zones.some((z) => z.contour);
     if (!anyLens) res.errors.push(M.noLens());
     if (opts.useModel && !engine.model) res.warnings.push(M.classicFallback());
     res.ok = anyLens;

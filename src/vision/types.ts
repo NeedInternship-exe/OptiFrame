@@ -30,6 +30,10 @@ export interface PipelineOptions {
   printScale: number;
   /** Contour offset (mm) found by calibration against caliper readings. */
   bias: number;
+  /** Blank sheet used as reference when no printed mat is found. */
+  sheetFormat: 'auto' | 'letter' | 'a4';
+  /** One photo per lens: the (largest) lens found is this eye, wherever it lies. */
+  forceEye?: Eye | null;
   debug: boolean;
 }
 
@@ -39,6 +43,7 @@ export const DEFAULT_OPTIONS: PipelineOptions = {
   edgeHeight: 1.0,
   printScale: 1,
   bias: 0,
+  sheetFormat: 'auto',
   debug: true,
 };
 
@@ -82,8 +87,17 @@ export interface Quality {
   cameraHeight: number;
 }
 
+export interface Reference {
+  kind: 'mat' | 'sheet';
+  label: string; // "tapis OptiFrame", "feuille Lettre", "feuille A4"
+  w: number; // mm, reference page size in its photo orientation
+  h: number;
+  corners?: Vec2[]; // sheet corners in the photo (px)
+}
+
 export interface PipelineResult {
   ok: boolean;
+  reference?: Reference;
   errors: Msg[];
   warnings: Msg[];
   image: { width: number; height: number };
@@ -99,5 +113,6 @@ export interface PipelineResult {
 export interface LiveDetection {
   markers: { id: number; corners: Vec2[] }[]; // normalised [0,1] coordinates
   zonesVisible: Eye[];
+  sheet?: Vec2[]; // blank sheet corners, normalised
   tiltDeg?: number;
 }

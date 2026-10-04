@@ -58,24 +58,32 @@ export function HelpTab({ onLightbox }: { onLightbox: () => void }) {
   return (
     <div class="tab">
       <section class="card">
-        <h2>Le kit de capture</h2>
+        <h2>Prendre la photo</h2>
+        <h3>Option 1 · une feuille blanche (rien à imprimer)</h3>
+        <ol class="steps-list">
+          <li>Une feuille blanche Lettre ou A4, bien à plat, sur une table <b>plus foncée</b> que le papier.</li>
+          <li>Les verres face bombée vers le haut, à plus de 1 cm des bords. Deux verres : le droit (OD) à gauche, le gauche (OS) à droite.</li>
+          <li>Photo téléphone tenu droit (le haut des verres en haut de l’écran), à ~30 cm, les 4 coins de la feuille visibles.</li>
+        </ol>
+        <h3>Option 2 · le tapis imprimé (plus précis)</h3>
         <ol class="steps-list">
           <li>
-            Imprimez le <a href={`${BASE}mat/optiframe-mat-A4.pdf`} download>tapis A4 (PDF)</a> à <b>100 %</b>. Vérifiez au réglet que la règle centrale mesure 100 mm.
+            Imprimer à <b>100 %</b> : <a href={`${BASE}mat/optiframe-mat-lettre.pdf`} download>tapis Lettre</a> ou <a href={`${BASE}mat/optiframe-mat-A4.pdf`} download>tapis A4</a>. Vérifier au réglet que la règle centrale mesure 100 mm.
           </li>
-          <li>Posez la feuille à plat. Idéal : sur l’écran d’un portable affichant du blanc (boîte lumineuse), ou près d’une fenêtre.</li>
-          <li>Posez chaque verre face bombée vers le haut, dans sa zone : OD (droit) à gauche, OS (gauche) à droite, côté nez vers la règle.</li>
-          <li>Photographiez à ~25 cm, téléphone à plat. Une photo peut mesurer les deux verres.</li>
+          <li>Idéal : poser la feuille sur l’écran d’un portable affichant du blanc (boîte lumineuse) : le bord du verre ressort en noir.</li>
+          <li>Verre droit (OD) dans la zone de gauche, verre gauche (OS) dans celle de droite, côté nez vers la règle.</li>
         </ol>
         <div class="row-actions">
+          <a class="btn" href={`${BASE}mat/optiframe-mat-lettre.pdf`} download>
+            <IconDownload /> Tapis Lettre
+          </a>
           <a class="btn" href={`${BASE}mat/optiframe-mat-A4.pdf`} download>
-            <IconDownload /> Tapis PDF
+            <IconDownload /> Tapis A4
           </a>
           <button class="btn" onClick={onLightbox}>
             <IconSun /> Boîte lumineuse
           </button>
         </div>
-        <p class="muted small">« Boîte lumineuse » : ouvrez cette page sur un portable ou une tablette, posez le tapis sur l’écran blanc. Le bord du verre ressort en noir.</p>
       </section>
 
       <section class="card">
@@ -97,6 +105,14 @@ export function HelpTab({ onLightbox }: { onLightbox: () => void }) {
         <label class="toggle">
           <input type="checkbox" checked={s.align} onChange={(e) => set({ align: (e.target as HTMLInputElement).checked })} />
           <span>Redresser automatiquement un verre posé de travers</span>
+        </label>
+        <label class="field">
+          <span>Format de la feuille blanche</span>
+          <select value={s.sheetFormat} onChange={(e) => set({ sheetFormat: (e.target as HTMLSelectElement).value as Settings['sheetFormat'] })}>
+            <option value="auto">Automatique (Lettre ou A4)</option>
+            <option value="letter">Lettre (216 × 279 mm)</option>
+            <option value="a4">A4 (210 × 297 mm)</option>
+          </select>
         </label>
         <Num label="Hauteur du bord du verre au-dessus du papier" hint="Corrige la parallaxe (le bord est vu un peu plus loin du centre de l’image)." value={s.edgeHeight} step={0.1} onChange={(v) => set({ edgeHeight: Math.max(0, Math.min(5, v)) })} />
         <label class="field">

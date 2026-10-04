@@ -4,8 +4,23 @@ import type { Msg } from './types.ts';
 export const M = {
   noMarkers: (): Msg => ({
     code: 'NO_MARKERS',
-    text: 'Tapis OptiFrame non détecté.',
-    tip: 'Cadrez la feuille imprimée : les carrés noirs (repères) doivent être visibles et nets.',
+    text: 'Ni feuille ni tapis détecté.',
+    tip: 'Posez une feuille blanche (Lettre ou A4) sur une table plus foncée et cadrez ses 4 coins, ou cadrez le tapis imprimé avec ses carrés noirs.',
+  }),
+  sheetBorder: (): Msg => ({
+    code: 'SHEET_BORDER',
+    text: 'Le verre touche le bord de la feuille.',
+    tip: 'Éloignez le verre d’au moins 1 cm des bords de la feuille.',
+  }),
+  sheetInfo: (label: string): Msg => ({
+    code: 'SHEET',
+    text: `Référence : ${label} (sans tapis imprimé).`,
+    tip: 'Le verre le plus à gauche est le verre droit (OD). Pour plus de précision, utilisez la boîte lumineuse avec le tapis imprimé.',
+  }),
+  severalLenses: (eye: string): Msg => ({
+    code: 'SEVERAL',
+    text: `Plusieurs verres sur la photo : le plus grand est enregistré comme verre ${eye}.`,
+    tip: 'Pour une photo par verre, ne laissez qu’un seul verre sur la feuille.',
   }),
   fewMarkers: (n: number): Msg => ({
     code: 'FEW_MARKERS',

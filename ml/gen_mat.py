@@ -19,30 +19,38 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PAGE_W, PAGE_H = 297.0, 210.0
+# The mat is drawn on a 279.4 x 210 mm canvas = the intersection of US Letter
+# and A4 in landscape, so the same mat prints at 100 % on both papers.
+PAGE_W, PAGE_H = 279.4, 210.0
 MARKER = 24.0  # marker side (6x6 cells of 4 mm, 1-cell black border included)
 DICT = "DICT_4X4_50"
+PAPERS = {  # page size and canvas offset on the paper (mm)
+    "A4": (297.0, 210.0, (297.0 - PAGE_W) / 2, 0.0),
+    "lettre": (279.4, 215.9, 0.0, (215.9 - PAGE_H) / 2),
+}
 
 # Top-left corner of each marker. IDs go clockwise from the top-left corner.
+_M, _X1, _Y1 = 9.0, PAGE_W / 2 - MARKER / 2, PAGE_H / 2 - MARKER / 2
+_X2, _Y2 = PAGE_W - 9.0 - MARKER, PAGE_H - 9.0 - MARKER
 MARKERS = [
-    (0, 10.0, 10.0),
-    (1, 136.5, 10.0),
-    (2, 263.0, 10.0),
-    (3, 263.0, 93.0),
-    (4, 263.0, 176.0),
-    (5, 136.5, 176.0),
-    (6, 10.0, 176.0),
-    (7, 10.0, 93.0),
+    (0, _M, _M),
+    (1, _X1, _M),
+    (2, _X2, _M),
+    (3, _X2, _Y1),
+    (4, _X2, _Y2),
+    (5, _X1, _Y2),
+    (6, _M, _Y2),
+    (7, _M, _Y1),
 ]
 
 # Lens zones as seen from the front of the glasses: the right-eye lens (OD)
 # sits on the left of the picture, the left-eye lens (OS) on the right.
 ZONES = {
-    "OD": {"x": 42.0, "y": 42.0, "w": 88.0, "h": 126.0, "nasal": "right"},
-    "OS": {"x": 167.0, "y": 42.0, "w": 88.0, "h": 126.0, "nasal": "left"},
+    "OD": {"x": 40.0, "y": 40.0, "w": 81.0, "h": 130.0, "nasal": "right"},
+    "OS": {"x": PAGE_W - 40.0 - 81.0, "y": 40.0, "w": 81.0, "h": 130.0, "nasal": "left"},
 }
-RULER = {"x": 148.5, "y0": 55.0, "y1": 155.0}
-VERSION = "OptiFrame mat A4 v1"
+RULER = {"x": PAGE_W / 2, "y0": 55.0, "y1": 155.0}
+VERSION = "OptiFrame mat v2 (Lettre/A4)"
 
 
 def marker_bits(mid: int) -> list[list[int]]:
@@ -86,16 +94,18 @@ def build_spec() -> dict:
 
 
 # --------------------------------------------------------------------------- PDF
-def write_pdf(spec: dict, path: Path) -> None:
-    from reportlab.lib.colors import Color, black, white
+def write_pdf(spec: dict, path: Path, paper: str) -> None:
+    from reportlab.lib.colors import Color, black
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
 
-    c = canvas.Canvas(str(path), pagesize=(PAGE_W * mm, PAGE_H * mm))
-    c.setTitle("OptiFrame - tapis de mesure A4 (imprimer a 100 %)")
+    pw, ph, ox, oy = PAPERS[paper]
+    c = canvas.Canvas(str(path), pagesize=(pw * mm, ph * mm))
+    c.setTitle(f"OptiFrame - tapis de mesure {paper} (imprimer a 100 %)")
+    c.translate(ox * mm, 0)  # canvas centred on the paper
 
-    def Y(y):  # top-left mm -> PDF points (origin bottom-left)
-        return (PAGE_H - y) * mm
+    def Y(y):  # canvas mm (top-left origin) -> PDF points (origin bottom-left)
+        return (ph - oy - y) * mm
 
     cell = MARKER / 6
     c.setFillColor(black)
@@ -235,7 +245,8 @@ def render_raster(spec: dict, ppm: float, ss: int = 4) -> np.ndarray:
         y = int((ry0 + i) * s)
         cv2.line(img, (int(rx * s), y), (int((rx + L) * s), y), 0, max(1, int(0.1 * s)))
     # footer text blocks
-    for x, y, w in ((42, 182, 50), (42, 187.5, 80), (42, 192, 85), (167, 182, 70), (167, 186.5, 72), (167, 192, 60)):
+    xl, xr = spec["zones"]["OD"]["x"], spec["zones"]["OS"]["x"]
+    for x, y, w in ((xl, 182, 50), (xl, 187.5, 75), (xl, 192, 70), (xr, 182, 50), (xr, 186.5, 55), (xr, 192, 60)):
         R(x, y, x + w, y + 2, 120)
     return cv2.resize(img, (int(round(PAGE_W * ppm)), int(round(PAGE_H * ppm))), interpolation=cv2.INTER_AREA)
 
@@ -246,8 +257,9 @@ def main() -> None:
     (ROOT / "shared" / "mat.json").write_text(json.dumps(spec, indent=1))
     out = ROOT / "public" / "mat"
     out.mkdir(parents=True, exist_ok=True)
-    write_pdf(spec, out / "optiframe-mat-A4.pdf")
-    write_svg(spec, out / "optiframe-mat-A4.svg")
+    write_pdf(spec, out / "optiframe-mat-A4.pdf", "A4")
+    write_pdf(spec, out / "optiframe-mat-lettre.pdf", "lettre")
+    write_svg(spec, out / "optiframe-mat.svg")
     assets = ROOT / "ml" / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     for ppm in (3, 12):

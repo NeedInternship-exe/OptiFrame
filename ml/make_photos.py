@@ -32,7 +32,7 @@ def rot(ax, ay, az):
     return Rz @ Ry @ Rx
 
 
-def camera_homography(rng, W, H, target_mm, span_xy):
+def camera_homography(rng, W, H, target_mm, span_xy, allow_flip=True):
     """H maps mat mm (X, Y, 1) -> image px. Camera looks at target point.
 
     span_xy: (width, height) in mm of the mat region that must stay in frame.
@@ -45,6 +45,8 @@ def camera_homography(rng, W, H, target_mm, span_xy):
     region_landscape = span_xy[0] >= span_xy[1]
     image_landscape = W >= H
     base_roll = [0, np.pi] if region_landscape == image_landscape else [np.pi / 2, -np.pi / 2]
+    if not allow_flip:  # phone held upright relative to the sheet (blank-sheet mode)
+        base_roll = [0.0]
     roll = rng.choice(base_roll) + np.deg2rad(rng.normal(0, 5))
     # camera z axis points from camera to the mat (mat normal is -z in camera frame when fronto-parallel)
     R = rot(np.cos(az) * tilt, np.sin(az) * tilt, roll)
@@ -63,8 +65,9 @@ def camera_homography(rng, W, H, target_mm, span_xy):
     return Hm / Hm[2, 2], dict(f=f, tilt_deg=float(np.rad2deg(tilt)), height_mm=float(-C[2]) if C[2] < 0 else float(C[2]))
 
 
-def table_texture(rng, W, H):
-    base = np.array(rng.choice([[0.55, 0.42, 0.3], [0.35, 0.36, 0.38], [0.75, 0.74, 0.72], [0.2, 0.2, 0.22]]), np.float32)
+def table_texture(rng, W, H, dark_only=False):
+    colors = [[0.55, 0.42, 0.3], [0.35, 0.36, 0.38], [0.2, 0.2, 0.22]] + ([] if dark_only else [[0.75, 0.74, 0.72]])
+    base = np.array(colors[rng.integers(len(colors))], np.float32)
     n = cv2.resize(rng.normal(0, 1, (H // 40 + 2, W // 8 + 2)).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
     return np.clip(base[None, None, :] * (1 + 0.08 * n[..., None]), 0, 1)
 
@@ -75,46 +78,77 @@ def main():
     ap.add_argument("--out", default="../bench/photos")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--res", default="4032x3024", help="photo size, e.g. 1920x1440 for a browser video frame")
+    ap.add_argument("--sheet", default="", choices=["", "letter", "a4"], help="blank sheet instead of the printed mat")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     mat = mat_raster(PPM)
-    Hm_, Wm_ = mat.shape
     gt_all = []
     for k in range(args.n):
         rng = np.random.default_rng(args.seed * 1000 + k)
-        backlit = rng.random() < 0.4
-        bg = paper_background(rng, mat, backlit)
         lenses, polys_px = [], []
-        mode = rng.choice(["pair", "OD", "OS"], p=[0.5, 0.25, 0.25])
-        zones = ["OD", "OS"] if mode == "pair" else [mode]
-        for z in zones:
-            zs = SPEC["zones"][z]
-            shape = random_lens_shape(rng)
-            a = np.deg2rad(rng.uniform(-6, 6))
-            Rm = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
-            shape = shape @ Rm.T
-            half = (shape.max(0) - shape.min(0)) / 2
-            cx = rng.uniform(zs["x"] + half[0] + 6, zs["x"] + zs["w"] - half[0] - 6)
-            cy = rng.uniform(zs["y"] + half[1] + 6, zs["y"] + zs["h"] - half[1] - 6)
-            poly_mm = shape + [cx, cy]
-            polys_px.append(poly_mm * PPM - 0.5)  # pixel centres at integer coords
-            lenses.append({"zone": z, "poly": poly_mm.round(4).tolist()})
+        if args.sheet:
+            # blank sheet, landscape or portrait; lenses anywhere >= 12 mm from the edges
+            sw, sh = {"letter": (279.4, 215.9), "a4": (297.0, 210.0)}[args.sheet]
+            if rng.random() < 0.35:
+                sw, sh = sh, sw
+            page = np.full((int(round(sh * PPM)), int(round(sw * PPM))), 255, np.uint8)
+            backlit = False
+            bg = paper_background(rng, page, backlit)
+            n_l = 2 if (sw > sh and rng.random() < 0.6) else 1
+            mode = "sheet-pair" if n_l == 2 else "sheet-one"
+            slots = [(12, sw / 2 - 4), (sw / 2 + 4, sw - 12)] if n_l == 2 else [(12, sw - 12)]
+            for xa, xb in slots:
+                shape = random_lens_shape(rng)
+                a = np.deg2rad(rng.uniform(-6, 6))
+                shape = shape @ np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]]).T
+                half = (shape.max(0) - shape.min(0)) / 2
+                cx = rng.uniform(xa + half[0], max(xa + half[0] + 0.1, xb - half[0]))
+                cy = rng.uniform(12 + half[1], sh - 12 - half[1])
+                poly_mm = shape + [cx, cy]
+                polys_px.append(poly_mm * PPM - 0.5)
+                lenses.append({"zone": "OD" if cx < sw / 2 else "OS", "poly": poly_mm.round(4).tolist()})
+            if n_l == 2:
+                lenses[0]["zone"], lenses[1]["zone"] = "OD", "OS"
+            Hm_, Wm_ = page.shape
+            target, span = (sw / 2, sh / 2), (sw + 20, sh + 20)
+        else:
+            backlit = rng.random() < 0.4
+            bg = paper_background(rng, mat, backlit)
+            Hm_, Wm_ = mat.shape
+            mode = rng.choice(["pair", "OD", "OS"], p=[0.5, 0.25, 0.25])
+            zones = ["OD", "OS"] if mode == "pair" else [mode]
+            for z in zones:
+                zs = SPEC["zones"][z]
+                shape = random_lens_shape(rng)
+                a = np.deg2rad(rng.uniform(-6, 6))
+                Rm = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+                shape = shape @ Rm.T
+                half = (shape.max(0) - shape.min(0)) / 2
+                cx = rng.uniform(zs["x"] + half[0] + 6, zs["x"] + zs["w"] - half[0] - 6)
+                cy = rng.uniform(zs["y"] + half[1] + 6, zs["y"] + zs["h"] - half[1] - 6)
+                poly_mm = shape + [cx, cy]
+                polys_px.append(poly_mm * PPM - 0.5)  # pixel centres at integer coords
+                lenses.append({"zone": z, "poly": poly_mm.round(4).tolist()})
+            if mode == "pair":
+                target, span = (SPEC["page"]["w"] / 2, SPEC["page"]["h"] / 2), (SPEC["page"]["w"] + 6, SPEC["page"]["h"] + 6)
+            else:
+                zs = SPEC["zones"][mode]
+                target, span = (zs["x"] + zs["w"] / 2, zs["y"] + zs["h"] / 2), (zs["w"] + 70, zs["h"] + 66)
         flat, _ = render_lenses(bg, polys_px, PPM, rng, backlit)
 
         rw, rh = (int(v) for v in args.res.split("x"))
-        W, H = (rw, rh) if rng.random() < 0.5 else (rh, rw)
-        if mode == "pair":
-            target, span = (SPEC["page"]["w"] / 2, SPEC["page"]["h"] / 2), (SPEC["page"]["w"] + 6, SPEC["page"]["h"] + 6)
+        if args.sheet:  # phone held so that the sheet fills the frame
+            W, H = (max(rw, rh), min(rw, rh)) if sw > sh else (min(rw, rh), max(rw, rh))
         else:
-            zs = SPEC["zones"][mode]
-            target, span = (zs["x"] + zs["w"] / 2, zs["y"] + zs["h"] / 2), (zs["w"] + 70, zs["h"] + 66)
-        Hc, cam = camera_homography(rng, W, H, target, span)
+            W, H = (rw, rh) if rng.random() < 0.5 else (rh, rw)
+        Hc, cam = camera_homography(rng, W, H, target, span, allow_flip=not args.sheet)
+        cam["H"] = Hc.round(8).tolist()  # mm -> px (lets the benchmark check corners)
         # flat-raster px -> mm -> image px
         S = np.array([[1 / PPM, 0, 0.5 / PPM], [0, 1 / PPM, 0.5 / PPM], [0, 0, 1]])
         Hpx = Hc @ S
         # the table, then the sheet on top
-        table = table_texture(rng, W, H)
+        table = table_texture(rng, W, H, dark_only=bool(args.sheet))
         sheet = cv2.warpPerspective(flat, Hpx, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
         cover = cv2.warpPerspective(np.ones((Hm_, Wm_), np.float32), Hpx, (W, H), flags=cv2.INTER_LINEAR)
         img = table * (1 - cover[..., None]) + sheet * cover[..., None]
@@ -124,7 +158,7 @@ def main():
         img = camera_effects(rng, img, strength=1.6)
         name = f"photo_{k:03d}.jpg"
         cv2.imwrite(str(out / name), img[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 92])
-        gt_all.append({"file": name, "mode": mode, "backlit": bool(backlit), "camera": cam, "lenses": lenses})
+        gt_all.append({"file": name, "mode": str(mode), "backlit": bool(backlit), "camera": cam, "lenses": lenses, "reference": args.sheet or "mat"})
         print(name, mode, "backlit" if backlit else "ambient", f"tilt {cam['tilt_deg']:.0f}")
     (out / "ground_truth.json").write_text(json.dumps(gt_all))
 

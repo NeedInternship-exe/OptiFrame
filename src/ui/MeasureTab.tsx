@@ -37,9 +37,14 @@ export function ControlImage({ zone, raw, coarse }: { zone: ZoneResult; raw: Zon
   return <canvas ref={ref} class="control" />;
 }
 
-function LensCard({ eye }: { eye: Eye }) {
+function LensCard({ eye, onShoot, busy }: { eye: Eye; onShoot: (e: Eye) => void; busy: boolean }) {
   const st = useStore();
   const l = lensFor(st, eye);
+  const shoot = (
+    <button class="btn small lens-shoot" onClick={() => onShoot(eye)} disabled={busy}>
+      <IconCamera size={16} /> Photographier ce verre
+    </button>
+  );
   if (!l)
     return (
       <div class="lens-card empty">
@@ -47,7 +52,7 @@ function LensCard({ eye }: { eye: Eye }) {
         <div class="lens-thumb placeholder">
           <span>à mesurer</span>
         </div>
-        <div class="lens-dims muted">Posez le verre dans la zone {eye} du tapis</div>
+        {shoot}
       </div>
     );
   const t = outlinePath(l.contour, 120);
@@ -65,6 +70,7 @@ function LensCard({ eye }: { eye: Eye }) {
         périmètre {fmt(m.perimeter)} mm · {l.shots.length} prise{l.shots.length > 1 ? 's' : ''}
         {l.spread && l.spread.n > 1 ? ` · écart ±${fmt(Math.max(l.spread.rangeA, l.spread.rangeB) / 2, 2)}` : ''}
       </div>
+      {shoot}
     </div>
   );
 }
@@ -90,8 +96,14 @@ function RunResult({ last }: { last: LastRun }) {
       ))}
       {r.quality && (
         <div class="chips">
-          <span class="chip">{r.quality.nMarkers}/8 repères</span>
-          <span class="chip">reprojection {fmt(r.quality.reprojMm, 2)} mm</span>
+          {r.reference?.kind === 'sheet' ? (
+            <span class="chip">{r.reference.label}</span>
+          ) : (
+            <>
+              <span class="chip">{r.quality.nMarkers}/8 repères</span>
+              <span class="chip">reprojection {fmt(r.quality.reprojMm, 2)} mm</span>
+            </>
+          )}
           <span class="chip">netteté {fmt(r.quality.blurMm, 2)} mm</span>
           <span class="chip">inclinaison {Math.round(r.quality.tiltDeg)}°</span>
           <span class="chip">{fmt(r.quality.pxPerMm, 1)} px/mm</span>
@@ -166,17 +178,18 @@ export function exportSVG() {
 export function MeasureTab() {
   const st = useStore();
   const [camera, setCamera] = useState(false);
+  const [target, setTarget] = useState<Eye | null>(null); // one photo per lens
   const [stage, setStage] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
-  const run = async (get: () => Promise<Captured>, source: 'camera' | 'file' | 'sample') => {
+  const run = async (get: () => Promise<Captured>, source: 'camera' | 'file' | 'sample', eye: Eye | null = null) => {
     setErr(null);
     setStage('load');
     try {
       const c = await get();
       setStage('markers');
-      await analyse(c, source, setStage);
+      await analyse(c, source, setStage, eye);
       setState({ onboarded: true });
     } catch (e) {
       setErr(`Le traitement a échoué : ${String(e)}`);
@@ -189,7 +202,11 @@ export function MeasureTab() {
     const f = (ev.target as HTMLInputElement).files?.[0];
     (ev.target as HTMLInputElement).value = '';
     setCamera(false);
-    if (f) run(() => fromBlob(f), 'file');
+    if (f) run(() => fromBlob(f), 'file', target);
+  };
+  const shootEye = (e: Eye | null) => {
+    setTarget(e);
+    setCamera(true);
   };
 
   const engine = st.engine;
@@ -201,15 +218,18 @@ export function MeasureTab() {
           <h2>Mesurer un verre en 3 étapes</h2>
           <ol class="steps-list">
             <li>
-              <b>Imprimez le tapis</b> à 100 % (taille réelle) et posez-le à plat. <a href={`${import.meta.env.BASE_URL}mat/optiframe-mat-A4.pdf`} download>Télécharger le PDF</a>
+              <b>Une feuille blanche</b> (Lettre ou A4, rien à imprimer) posée à plat sur une <b>table plus foncée</b>.
             </li>
             <li>
-              <b>Posez le verre</b> face bombée vers le haut dans la zone OD (verre droit) ou OS (verre gauche). Astuce : feuille sur l’écran blanc d’un portable = boîte lumineuse.
+              <b>Posez le verre</b> face bombée vers le haut, à plus de 1 cm des bords. Deux verres : le droit (OD) à gauche, le gauche (OS) à droite.
             </li>
             <li>
-              <b>Photographiez</b> téléphone à plat, à ~25 cm : les carrés noirs doivent être visibles.
+              <b>Photographiez</b> téléphone tenu droit, à ~30 cm : les 4 coins de la feuille doivent être visibles.
             </li>
           </ol>
+          <p class="muted small">
+            Plus précis : le <a href={`${import.meta.env.BASE_URL}mat/optiframe-mat-lettre.pdf`} download>tapis imprimé (Lettre)</a> ou <a href={`${import.meta.env.BASE_URL}mat/optiframe-mat-A4.pdf`} download>A4</a>, posé sur l’écran blanc d’un portable (boîte lumineuse).
+          </p>
           <button class="btn ghost" onClick={() => run(() => fromUrl(SAMPLE), 'sample')} disabled={engine.state !== 'ready' || !!stage}>
             <IconSpark /> Pas de tapis ? Essayer avec une photo d’exemple (synthétique)
           </button>
@@ -218,15 +238,22 @@ export function MeasureTab() {
 
       <div class="lens-grid">
         {EYES.map((e) => (
-          <LensCard eye={e} key={e} />
+          <LensCard eye={e} key={e} onShoot={shootEye} busy={!!stage} />
         ))}
       </div>
 
       <div class="capture-bar">
-        <button class="btn primary big" onClick={() => setCamera(true)} disabled={!!stage}>
-          <IconCamera /> Photographier
+        <button class="btn primary big" onClick={() => shootEye(null)} disabled={!!stage}>
+          <IconCamera /> Photographier les 2 verres
         </button>
-        <button class="btn" onClick={() => file.current?.click()} disabled={!!stage}>
+        <button
+          class="btn"
+          onClick={() => {
+            setTarget(null);
+            file.current?.click();
+          }}
+          disabled={!!stage}
+        >
           <IconImage /> Importer
         </button>
         <input ref={file} type="file" accept="image/*" hidden onChange={onFile} />
@@ -265,11 +292,12 @@ export function MeasureTab() {
 
       {camera && (
         <Camera
+          target={target}
           onClose={() => setCamera(false)}
           onFile={() => file.current?.click()}
           onCapture={(c) => {
             setCamera(false);
-            run(async () => c, 'camera');
+            run(async () => c, 'camera', target);
           }}
         />
       )}

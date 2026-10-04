@@ -817,3 +817,20 @@ ul.kv li b {
   color: #c8c8c8;
   font-size: 0.8rem;
 }
+
+.lens-shoot {
+  margin-top: 4px;
+  width: 100%;
+}
+.camera-target {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(70px + env(safe-area-inset-top));
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.85);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

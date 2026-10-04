@@ -17,6 +17,7 @@ export interface Settings {
   edgeHeight: number;
   printScale: number;
   bias: number;
+  sheetFormat: 'auto' | 'letter' | 'a4';
 }
 
 export interface Shot {
@@ -76,7 +77,7 @@ export interface State {
   collect: Collect;
 }
 
-export const DEFAULT_SETTINGS: Settings = { useModel: true, refine: true, align: true, edgeHeight: 1.0, printScale: 1, bias: 0 };
+export const DEFAULT_SETTINGS: Settings = { useModel: true, refine: true, align: true, edgeHeight: 1.0, printScale: 1, bias: 0, sheetFormat: 'auto' };
 const KEY = 'optiframe:v1';
 const PERSIST: (keyof State)[] = ['settings', 'shots', 'use', 'frame', 'onboarded', 'collect'];
 

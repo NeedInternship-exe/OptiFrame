@@ -2,6 +2,7 @@
 import { collectRun } from './collect.ts';
 import { getState, setState, uid, type Shot } from './store.ts';
 import { VisionClient } from '../vision/client.ts';
+import type { Eye } from '../core/mat.ts';
 import type { PipelineResult, RGBAImage } from '../vision/types.ts';
 
 const MAX_SIDE = 4096; // 48 MP photos are downscaled: ~13 px/mm is plenty
@@ -46,7 +47,7 @@ export async function fromUrl(url: string): Promise<Captured> {
 export type Stage = 'markers' | 'rectify' | 'segment' | 'contour';
 
 /** Run the pipeline, store the run and save every detected lens as a shot. */
-export async function analyse(c: Captured, source: Shot['source'], onStage?: (s: string) => void): Promise<PipelineResult> {
+export async function analyse(c: Captured, source: Shot['source'], onStage?: (s: string) => void, forceEye: Eye | null = null): Promise<PipelineResult> {
   const st = getState();
   const { settings } = st;
   const result = await vision.process(
@@ -57,6 +58,8 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
       edgeHeight: settings.edgeHeight,
       printScale: 1, // applied retroactively in shotLens()
       bias: 0,
+      sheetFormat: settings.sheetFormat,
+      forceEye,
       debug: true,
     },
     onStage,

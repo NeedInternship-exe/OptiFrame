@@ -98,11 +98,11 @@ export interface ContourResult {
 }
 
 /**
- * Pick the lens component in a probability map and extract a sub-pixel,
- * smoothed outline (in mat mm). (x0, y0) = mm position of the map's left/top
- * edge, ppm = map resolution.
+ * Pick a lens component in a probability map (rank 0 = largest, 1 = second
+ * largest...) and extract a sub-pixel, smoothed outline (in mat mm).
+ * (x0, y0) = mm position of the map's left/top edge, ppm = map resolution.
  */
-export function probToContour(cv: CV, prob: Float32Array, w: number, h: number, ppm: number, x0: number, y0: number): ContourResult | null {
+export function probToContour(cv: CV, prob: Float32Array, w: number, h: number, ppm: number, x0: number, y0: number, rank = 0): ContourResult | null {
   const mats: any[] = [];
   try {
     const bin = new Uint8Array(w * h);
@@ -112,13 +112,15 @@ export function probToContour(cv: CV, prob: Float32Array, w: number, h: number, 
     mats.push(binM, labels, stats, cents);
     const n = cv.connectedComponentsWithStats(binM, labels, stats, cents, 8, cv.CV_32S);
     const minA = 300 * ppm * ppm, maxA = 6000 * ppm * ppm;
-    let best = -1, bestA = 0, candidates = 0;
+    const cands: { i: number; a: number }[] = [];
     for (let i = 1; i < n; i++) {
       const a = stats.intAt(i, cv.CC_STAT_AREA);
-      if (a >= minA && a <= maxA) candidates++;
-      if (a >= minA && a <= maxA && a > bestA) (best = i), (bestA = a);
+      if (a >= minA && a <= maxA) cands.push({ i, a });
     }
-    if (best < 0) return null;
+    cands.sort((p, q) => q.a - p.a);
+    const candidates = cands.length;
+    if (rank >= candidates) return null;
+    const best = cands[rank].i;
     const L = labels.data32S;
     const comp = new Uint8Array(w * h);
     for (let i = 0; i < w * h; i++) comp[i] = L[i] === best ? 255 : 0;

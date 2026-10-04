@@ -118,11 +118,21 @@ function intersect(a: Line, b: Line): Vec2 | null {
   return [a.p[0] + t * a.d[0], a.p[1] + t * a.d[1]];
 }
 
+interface QuadOpts {
+  insideDark: boolean; // marker: dark inside / paper: bright inside
+  win: (len: number) => number; // half search window along the normal (px)
+  t0: number; // portion of each side that is sampled (corners excluded)
+  samples: (len: number) => number;
+  minContrast: number; // grey levels between both sides of the edge
+  maxMove: (side: number) => number; // reject refined corners that moved too far
+}
+
 /**
- * Refine the 4 corners of a marker at full resolution.
- * The marker border is black inside, the paper is white outside.
+ * Refine a quadrilateral at full resolution: fit a straight line to each side
+ * (sub-pixel gradient peak along ~K normals, outliers rejected) and intersect
+ * the lines. Also returns the median 20-80 % edge rise (blur estimate).
  */
-export function refineMarker(g: Gray, id: number, c: Vec2[]): MarkerDet {
+export function refineQuad(g: Gray, c: Vec2[], o: QuadOpts): { corners: Vec2[]; refined: boolean; spread: number } {
   const cx = (c[0][0] + c[1][0] + c[2][0] + c[3][0]) / 4;
   const cy = (c[0][1] + c[1][1] + c[2][1] + c[3][1]) / 4;
   const lines: (Line | null)[] = [];
@@ -134,19 +144,21 @@ export function refineMarker(g: Gray, id: number, c: Vec2[]): MarkerDet {
     let nrm: Vec2 = [-dir[1], dir[0]];
     const mx = (a[0] + b[0]) / 2 - cx, my = (a[1] + b[1]) / 2 - cy;
     if (nrm[0] * mx + nrm[1] * my < 0) nrm = [-nrm[0], -nrm[1]];
-    const w = Math.max(2.5, (len / 6) * 0.45); // stay within half a cell
-    const step = 0.25;
+    // profiles always go from the dark side to the bright side
+    if (!o.insideDark) nrm = [-nrm[0], -nrm[1]];
+    const w = o.win(len);
+    const step = Math.max(0.25, w / 40);
     const S = Math.floor((2 * w) / step) + 1;
-    const K = Math.max(8, Math.min(40, Math.round(len / 3)));
+    const K = o.samples(len);
     const pts: Vec2[] = [];
     const prof = new Float64Array(S);
+    const dv = new Float64Array(S);
     for (let k = 0; k < K; k++) {
-      const t = 0.14 + (0.72 * k) / (K - 1);
+      const t = o.t0 + ((1 - 2 * o.t0) * k) / (K - 1);
       const px = a[0] + dir[0] * len * t, py = a[1] + dir[1] * len * t;
       let bad = false;
       for (let s = 0; s < S; s++) {
-        const o = -w + s * step;
-        const v = sampleGray(g, px + nrm[0] * o, py + nrm[1] * o);
+        const v = sampleGray(g, px + nrm[0] * (-w + s * step), py + nrm[1] * (-w + s * step));
         if (Number.isNaN(v)) {
           bad = true;
           break;
@@ -154,20 +166,19 @@ export function refineMarker(g: Gray, id: number, c: Vec2[]): MarkerDet {
         prof[s] = v;
       }
       if (bad) continue;
-      // derivative of a lightly smoothed profile (white outside => positive)
+      // derivative of a lightly smoothed profile (dark -> bright => positive)
       let best = -Infinity, bi = -1;
-      const dv = new Float64Array(S);
       for (let s = 2; s < S - 2; s++) {
         dv[s] = (prof[s + 1] + prof[s + 2] - prof[s - 1] - prof[s - 2]) / 6;
         if (dv[s] > best) (best = dv[s]), (bi = s);
       }
       const lo = (prof[0] + prof[1] + prof[2]) / 3, hi = (prof[S - 1] + prof[S - 2] + prof[S - 3]) / 3;
-      if (bi < 3 || bi > S - 4 || hi - lo < 25) continue;
+      if (bi < 3 || bi > S - 4 || hi - lo < o.minContrast) continue;
       const y0 = dv[bi - 1], y1 = dv[bi], y2 = dv[bi + 1];
       const den = y0 - 2 * y1 + y2;
       const sub = den < 0 ? (0.5 * (y0 - y2)) / den : 0;
-      const o = -w + (bi + Math.max(-0.5, Math.min(0.5, sub))) * step;
-      pts.push([px + nrm[0] * o, py + nrm[1] * o]);
+      const off = -w + (bi + Math.max(-0.5, Math.min(0.5, sub))) * step;
+      pts.push([px + nrm[0] * off, py + nrm[1] * off]);
       // 20-80 % rise distance (blur estimate)
       const l20 = lo + 0.2 * (hi - lo), l80 = lo + 0.8 * (hi - lo);
       let s20 = NaN, s80 = NaN;
@@ -182,16 +193,108 @@ export function refineMarker(g: Gray, id: number, c: Vec2[]): MarkerDet {
   spreads.sort((x, y) => x - y);
   const spread = spreads.length ? spreads[Math.floor(spreads.length / 2)] : NaN;
   const out: Vec2[] = [];
-  let ok = true;
   for (let i = 0; i < 4; i++) {
     const la = lines[(i + 3) % 4], lb = lines[i];
     const p = la && lb ? intersect(la, lb) : null;
     const side = Math.hypot(c[(i + 1) % 4][0] - c[i][0], c[(i + 1) % 4][1] - c[i][1]);
-    if (!p || Math.hypot(p[0] - c[i][0], p[1] - c[i][1]) > Math.max(2.5, 0.06 * side)) {
-      ok = false;
-      break;
+    if (!p || Math.hypot(p[0] - c[i][0], p[1] - c[i][1]) > o.maxMove(side)) {
+      return { corners: c.map((q) => [q[0], q[1]] as Vec2), refined: false, spread };
     }
     out.push(p);
   }
-  return { id, corners: ok ? out : c.map((p) => [p[0], p[1]] as Vec2), refined: ok, edgeSpreadPx: spread };
+  return { corners: out, refined: true, spread };
+}
+
+const MARKER_OPTS: QuadOpts = {
+  insideDark: true,
+  win: (len) => Math.max(2.5, (len / 6) * 0.45), // stay within half a cell
+  t0: 0.14,
+  samples: (len) => Math.max(8, Math.min(40, Math.round(len / 3))),
+  minContrast: 25,
+  maxMove: (side) => Math.max(2.5, 0.06 * side),
+};
+
+/** Refine the 4 corners of a marker (black border inside, white paper outside). */
+export function refineMarker(g: Gray, id: number, c: Vec2[]): MarkerDet {
+  const r = refineQuad(g, c, MARKER_OPTS);
+  return { id, corners: r.corners, refined: r.refined, edgeSpreadPx: r.spread };
+}
+
+// --------------------------------------------------------------------------- blank sheet
+const SHEET_OPTS: QuadOpts = {
+  insideDark: false,
+  win: (len) => Math.max(8, 0.015 * len),
+  t0: 0.08,
+  samples: (len) => Math.max(20, Math.min(80, Math.round(len / 8))),
+  minContrast: 15,
+  maxMove: (side) => Math.max(6, 0.03 * side),
+};
+
+/**
+ * Find a bright sheet of paper (its 4 corners) on a darker background.
+ * Works on a downscaled grey image; corners are ordered clockwise starting
+ * from the top-left one of the image.
+ */
+export function detectSheet(cv: CV, gray: any): Vec2[] | null {
+  const blur = new cv.Mat(), bin = new cv.Mat(), cs = new cv.MatVector(), hier = new cv.Mat();
+  try {
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+    cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+    const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+    cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k);
+    k.delete();
+    cv.findContours(bin, cs, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    const imgArea = gray.rows * gray.cols;
+    let best: Vec2[] | null = null, bestA = 0;
+    for (let i = 0; i < cs.size(); i++) {
+      const cnt = cs.get(i);
+      const a = cv.contourArea(cnt);
+      if (a < 0.08 * imgArea || a < bestA) continue;
+      const hull = new cv.Mat(), poly = new cv.Mat();
+      cv.convexHull(cnt, hull, false, true);
+      const peri = cv.arcLength(hull, true);
+      for (const eps of [0.01, 0.02, 0.03, 0.05]) {
+        cv.approxPolyDP(hull, poly, eps * peri, true);
+        if (poly.rows <= 4) break;
+      }
+      if (poly.rows === 4) {
+        const d = poly.data32S;
+        const q: Vec2[] = [0, 1, 2, 3].map((j) => [d[2 * j], d[2 * j + 1]]);
+        // the quad must touch the image border at most marginally (all 4 corners visible)
+        const inside = q.every(([x, y]) => x > 2 && y > 2 && x < gray.cols - 3 && y < gray.rows - 3);
+        if (inside && quadArea(q) > 0.85 * a) (best = orderQuad(q)), (bestA = a);
+      }
+      hull.delete();
+      poly.delete();
+    }
+    return best;
+  } finally {
+    blur.delete();
+    bin.delete();
+    cs.delete();
+    hier.delete();
+  }
+}
+
+/** Clockwise order (image y down) starting at the corner nearest the image top-left. */
+export function orderQuad(q: Vec2[]): Vec2[] {
+  const cx = q.reduce((s, p) => s + p[0], 0) / 4, cy = q.reduce((s, p) => s + p[1], 0) / 4;
+  const byAng = q.slice().sort((p, r) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(r[1] - cy, r[0] - cx));
+  let start = 0;
+  for (let i = 1; i < 4; i++) if (byAng[i][0] + byAng[i][1] < byAng[start][0] + byAng[start][1]) start = i;
+  return [0, 1, 2, 3].map((i) => byAng[(start + i) % 4]);
+}
+
+/** Wide search on the downscaled image: recovers corners cut by a shadow on the paper. */
+const SHEET_COARSE_OPTS: QuadOpts = {
+  insideDark: false,
+  win: (len) => Math.max(10, 0.08 * len),
+  t0: 0.12,
+  samples: () => 60,
+  minContrast: 12,
+  maxMove: (side) => 0.2 * side,
+};
+
+export function refineSheet(g: Gray, c: Vec2[], coarse = false) {
+  return refineQuad(g, c, coarse ? SHEET_COARSE_OPTS : SHEET_OPTS);
 }

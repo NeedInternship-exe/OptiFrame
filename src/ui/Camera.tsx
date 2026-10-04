@@ -1,11 +1,13 @@
 // Full-screen camera with live marker detection and guidance.
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { EYE_LABEL, type Eye } from '../core/mat.ts';
 import type { LiveDetection } from '../vision/types.ts';
 import { fromBlob, fromDrawable, vision, type Captured } from './capture.ts';
 import { IconClose, IconFlash, IconImage } from './icons.tsx';
 import { useStore } from './store.ts';
 
 interface Props {
+  target: Eye | null; // one photo per lens, or null for both lenses
   onCapture: (c: Captured) => void;
   onClose: () => void;
   onFile: () => void;
@@ -13,9 +15,13 @@ interface Props {
 
 function guidance(d: LiveDetection | null, engineReady: boolean): { text: string; ok: boolean } {
   if (!engineReady) return { text: 'Chargement du moteur de vision…', ok: false };
-  if (!d) return { text: 'Cadrez le tapis OptiFrame', ok: false };
+  if (!d) return { text: 'Cadrez la feuille ou le tapis', ok: false };
   const n = d.markers.length;
-  if (n === 0) return { text: 'Cadrez le tapis : les carrés noirs doivent être visibles', ok: false };
+  if (d.sheet) {
+    if ((d.tiltDeg ?? 0) > 35) return { text: 'Tenez le téléphone plus à plat', ok: false };
+    return { text: 'Feuille détectée · prêt', ok: true };
+  }
+  if (n === 0) return { text: 'Cadrez la feuille entière (4 coins) sur une table foncée', ok: false };
   if (n < 3) return { text: `${n} repère${n > 1 ? 's' : ''} sur 3 minimum — reculez un peu`, ok: false };
   if (!d.zonesVisible.length) return { text: 'Cadrez une zone de verre en entier', ok: false };
   if ((d.tiltDeg ?? 0) > 35) return { text: 'Tenez le téléphone plus à plat', ok: false };
@@ -23,7 +29,7 @@ function guidance(d: LiveDetection | null, engineReady: boolean): { text: string
   return { text: `Prêt · ${n} repères · zone ${z}`, ok: true };
 }
 
-export function Camera({ onCapture, onClose, onFile }: Props) {
+export function Camera({ target, onCapture, onClose, onFile }: Props) {
   const st = useStore();
   const video = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -110,9 +116,10 @@ export function Camera({ onCapture, onClose, onFile }: Props) {
     const s = Math.max(r.width / v.videoWidth, r.height / v.videoHeight);
     const ox = (r.width - v.videoWidth * s) / 2, oy = (r.height - v.videoHeight * s) / 2;
     const ok = guidance(det, true).ok;
-    for (const m of det.markers) {
+    const quads = det.sheet ? [det.sheet] : det.markers.map((m) => m.corners);
+    for (const corners of quads) {
       ctx.beginPath();
-      m.corners.forEach(([x, y], i) => {
+      corners.forEach(([x, y], i) => {
         const px = ox + x * v.videoWidth * s, py = oy + y * v.videoHeight * s;
         if (i) ctx.lineTo(px, py);
         else ctx.moveTo(px, py);
@@ -173,6 +180,7 @@ export function Camera({ onCapture, onClose, onFile }: Props) {
           <span style={{ width: 44 }} />
         )}
       </div>
+      <div class="camera-target">{target ? `${EYE_LABEL[target]} · un seul verre sur la feuille` : 'Les 2 verres · le droit (OD) à gauche'}</div>
       {error && (
         <div class="camera-error">
           <p>{error}</p>
@@ -190,7 +198,7 @@ export function Camera({ onCapture, onClose, onFile }: Props) {
         </button>
         <span style={{ width: 44 }} />
       </div>
-      <p class="camera-tip">Téléphone à plat, ~25 cm au-dessus du verre · évitez l’ombre du téléphone</p>
+      <p class="camera-tip">Téléphone tenu droit et à plat · les 4 coins de la feuille visibles · évitez l’ombre du téléphone</p>
     </div>
   );
 }

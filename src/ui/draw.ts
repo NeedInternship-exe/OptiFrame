@@ -126,7 +126,7 @@ export function drawProb(canvas: HTMLCanvasElement, prob: ImagePatch, raw: Poly,
 }
 
 /** Downscaled photo with the detected markers. */
-export function drawPhoto(canvas: HTMLCanvasElement, photo: ImageBitmap, srcW: number, srcH: number, markers: MarkerDet[], widthPx = 640) {
+export function drawPhoto(canvas: HTMLCanvasElement, photo: ImageBitmap, srcW: number, srcH: number, markers: MarkerDet[], widthPx = 640, sheet?: Vec2[]) {
   const k = widthPx / srcW;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = Math.round(widthPx * dpr);
@@ -135,6 +135,15 @@ export function drawPhoto(canvas: HTMLCanvasElement, photo: ImageBitmap, srcW: n
   const ctx = canvas.getContext('2d')!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.drawImage(photo, 0, 0, widthPx, srcH * k);
+  if (sheet) {
+    ctx.strokeStyle = COLORS.marker;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    sheet.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+    ctx.closePath();
+    ctx.stroke();
+    sheet.forEach(([x, y], i) => label(ctx, ['0,0', 'x', '', 'y'][i] || '•', x * k, y * k + 5, 12));
+  }
   for (const m of markers) {
     ctx.strokeStyle = m.refined ? COLORS.marker : COLORS.coarse;
     ctx.lineWidth = 2.5;
