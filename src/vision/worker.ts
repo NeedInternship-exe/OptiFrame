@@ -17,7 +17,10 @@ let ready: Promise<void> | null = null;
 async function fetchWithProgress(url: string, what: 'opencv' | 'model'): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`${url}: HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length')) || 0;
+  // content-length is the *compressed* size when the server gzips: use the
+  // known uncompressed sizes as a floor so progress never exceeds 100 %
+  const expected = what === 'opencv' ? 10_300_000 : 2_100_000;
+  const total = Math.max(Number(res.headers.get('content-length')) || 0, expected);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let loaded = 0, last = 0;
@@ -34,7 +37,7 @@ async function fetchWithProgress(url: string, what: 'opencv' | 'model'): Promise
   const out = new Uint8Array(loaded);
   let o = 0;
   for (const c of chunks) out.set(c, o), (o += c.length);
-  post({ type: 'progress', what, loaded, total: total || loaded });
+  post({ type: 'progress', what, loaded, total: loaded });
   return out;
 }
 

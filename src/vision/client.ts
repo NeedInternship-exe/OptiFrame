@@ -37,7 +37,7 @@ export class VisionClient {
 
   private handle(m: FromWorker) {
     if (m.type === 'progress') {
-      this.setStatus({ [m.what]: m.total ? m.loaded / m.total : 0 });
+      this.setStatus({ [m.what]: m.total ? Math.min(1, m.loaded / m.total) : 0 });
     } else if (m.type === 'ready') {
       this.setStatus({ state: m.opencv ? 'ready' : 'error', modelReady: m.model, opencv: 1, model: 1, error: m.error });
     } else if (m.type === 'stage') {
