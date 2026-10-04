@@ -91,15 +91,20 @@ Ce domaine très contraint est **simulable de façon réaliste** — chaque imag
 
 **Modèle** ([`ml/train.py`](ml/train.py)) — U-Net à convolutions 3×3 (12→96 canaux, 5 niveaux), 516 k paramètres, ~2 GMAC par zone, entièrement convolutif.
 Perte : entropie croisée pondérée ×5 près du bord + Dice, étiquettes douces anti-crénelées (le bord à 0,5 tombe exactement sur le vrai contour).
-AdamW + OneCycle, 14 000 itérations × 16 images (224 000 images vues), GPU Apple M4 (MPS), ~2 h. Export ONNX (2 Mo), exécution par ONNX Runtime Web (wasm SIMD) : ~0,3 s par zone sur un M4.
+AdamW + OneCycle, 6 000 itérations puis 5 000 de reprise à taux décroissant × 16 images (176 000 images vues), IoU de validation 0,968, GPU Apple M4 (MPS), ~2 h. Export ONNX (2 Mo), exécution par ONNX Runtime Web (wasm SIMD) : ~0,3 s par zone sur un M4.
 
 **Évaluation de bout en bout** ([`bench/run.ts`](bench/run.ts)) — le *même code TypeScript que l’app* est exécuté sous Node sur 24 photos de téléphone simulées
-([`ml/make_photos.py`](ml/make_photos.py) : 36 verres, inclinaison 0–28°, téléphone tourné, table autour du tapis, défocalisation, bruit, JPEG), dont le contour exact est connu :
+([`ml/make_photos.py`](ml/make_photos.py) : 36 verres, inclinaison 0–28°, téléphone tourné, table autour du tapis, défocalisation, bruit, JPEG), dont le contour exact est connu (tapis : 24 photos, 34 verres ; feuille blanche : 24 photos, 35 verres) :
 
-| Méthode | Verres trouvés | Erreur moy. A et B | ≤ 1 mm | lumière ambiante | boîte lumineuse |
+| Référence · méthode | Verres trouvés | Erreur moy. A et B | ≤ 1 mm | lumière ambiante | boîte lumineuse |
 |---|---|---|---|---|---|
-| Classique (sans IA) + affinage | 29 / 36 | 1,59 mm | 67 % | 2,08 mm | 0,03 mm |
-| **IA + affinage** | **36 / 36** | **RESULT_AI mm** | **RESULT_PCT** | RESULT_AMB mm | RESULT_BACK mm |
+| Tapis · classique (sans IA) | 29 / 34 | 1,86 mm | 68 % | 2,24 mm | 0,06 mm |
+| Tapis · IA sans affinage | 34 / 34 | 0,21 mm | 100 % | 0,21 mm | 0,22 mm |
+| **Tapis · IA + affinage** | **34 / 34** | **0,16 mm** | **100 %** | 0,19 mm | 0,07 mm |
+| **Feuille Lettre · IA + affinage** | **23 / 23** | **0,17 mm** | 96 % | 0,17 mm | — |
+| **Feuille A4 · IA + affinage** | 11 / 12 | **0,16 mm** | 92 % | 0,16 mm | — |
+
+Résolution caméra navigateur (1920 × 1440, tapis) : 0,29 mm, 93 % ≤ 1 mm. Photos de test reproductibles : `python make_photos.py [--sheet letter|a4] [--res 1920x1440]`.
 
 **Vérité terrain réelle** : protocole pour vos propres verres — saisir les cotes au pied à coulisse (système boxing) dans *Valider*, l’app calcule l’erreur, exporte un CSV et peut **calibrer automatiquement le biais du contour** (*Aide → Calibrer*).
 

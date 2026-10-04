@@ -41,7 +41,7 @@ Chaque échantillon 256 × 256 px (85 × 85 mm) est rendu à 6 px/mm puis rédui
 - La normalisation est intégrée au graphe : l’app envoie du RGB dans [0, 1].
 
 **Entraînement** : perte = entropie croisée pondérée ×5 à moins de 1,5 mm du bord + 0,5 × Dice. AdamW (lr 2e-3, wd 1e-4), OneCycle,
-14 000 itérations × 16 images, flux infini (graines 0…224 000), validation sur 512 images fixes (graines 10 000 000+).
+6 000 itérations puis reprise de 5 000 itérations (lr 1e-3 décroissant) × 16 images, flux infini, validation sur 512 images fixes (graines 10 000 000+).
 Matériel : Apple M4 (MPS), environ 2 h. Données générées en parallèle par 9 processus.
 
 **Export** ([`export_onnx.py`](export_onnx.py)) : ONNX opset 17, hauteur et largeur dynamiques, 2 Mo. Écart maximal PyTorch ↔ onnxruntime : 7·10⁻⁶.
@@ -64,7 +64,15 @@ L’IA apporte la **robustesse** (savoir où est le verre malgré les pièges), 
 simulées ([`make_photos.py`](make_photos.py)). Ces photos comptent 36 verres, des inclinaisons de 0 à 28°, un téléphone tourné, la table
 visible autour du tapis, de la défocalisation, du bruit et de la compression JPEG. A et B sont mesurés par la même procédure sur le contour trouvé et sur le contour vrai.
 
-RESULTS_TABLE
+| Référence · méthode | Verres trouvés | Erreur moy. A et B | ≤ 1 mm | lumière ambiante | boîte lumineuse |
+|---|---|---|---|---|---|
+| Tapis · classique (sans IA) | 29 / 34 | 1,86 mm | 68 % | 2,24 mm | 0,06 mm |
+| Tapis · IA sans affinage | 34 / 34 | 0,21 mm | 100 % | 0,21 mm | 0,22 mm |
+| **Tapis · IA + affinage** | **34 / 34** | **0,16 mm** | **100 %** | 0,19 mm | 0,07 mm |
+| **Feuille Lettre · IA + affinage** | **23 / 23** | **0,17 mm** | 96 % | 0,17 mm | — |
+| **Feuille A4 · IA + affinage** | 11 / 12 | **0,16 mm** | 92 % | 0,16 mm | — |
+
+Résolution caméra navigateur (1920 × 1440, tapis) : 0,29 mm, 93 % ≤ 1 mm. Photos de test reproductibles : `python make_photos.py [--sheet letter|a4] [--res 1920x1440]`.
 
 ## 6. Passer aux vraies photos : la « capture appariée »
 

@@ -17,7 +17,7 @@
 | 1:50 | **Pas à pas** : repères → vue redressée → carte de l’IA → contour affiné | « Affinage sub-pixel des repères, homographie à 0,01 mm de reprojection. L’IA trouve le verre malgré les reflets, puis on recale le contour sur la photo d’origine en pleine résolution. » |
 | 2:40 | **Monture** : aperçu 3D, régler le pont (18 mm), **Télécharger monture.stl** | « Deux verres de formes différentes, deux cercles différents. Rainure en V à 45° qui s’imprime sans supports, jeu de 0,2 mm, tenons avec charnière. » |
 | 3:30 | **Valider** : superposition verre/rainure (0,20 mm mesuré sur le maillage), reprendre une photo pour montrer ΔA/ΔB | « On contrôle la cohérence sur le maillage réel et entre deux prises. » |
-| 4:10 | Données et IA (README) | « Aucun jeu de données n’existait : générateur synthétique dans le domaine redressé, 224 000 images. Sur photos simulées, l’erreur passe de 1,6 mm à environ 0,2 mm avec l’IA. Et la *capture appariée* permet d’annoter automatiquement de vraies photos. » |
+| 4:10 | Données et IA (README) | « Aucun jeu de données n’existait : générateur synthétique dans le domaine redressé, 176 000 images. Sur photos simulées, l’erreur passe de 1,9 mm à 0,16 mm avec l’IA. Et la *capture appariée* permet d’annoter automatiquement de vraies photos. » |
 | 4:40 | Limites (honnêtement) | « Modèle entraîné sur du synthétique, validé sur nos verres au pied à coulisse ; verres démontés uniquement ; les branches ne sont pas générées. » |
 
 ## Questions probables
