@@ -413,10 +413,12 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
         const xs = contour.map((p) => p[0]), ys = contour.map((p) => p[1]);
         const A = Math.max(...xs) - Math.min(...xs), B = Math.max(...ys) - Math.min(...ys);
         if (cr.touchesBorder) msgs.push(ref.kind === 'sheet' ? M.sheetBorder() : M.lensBorder());
-        if (A < 20 || A > 80 || B < 15 || B > 70) msgs.push(M.lensSize(A, B));
-        if (cr.confidence < 0.6) msgs.push(M.lowConfidence());
+        // impossible shapes are rejected (no shot is saved), doubtful ones flagged
+        const impossible = A < 20 || A > 75 || B < 15 || B > 65 || cr.solidity < 0.85;
+        if (A < 20 || A > 75 || B < 15 || B > 65) msgs.push(M.lensSize(A, B));
         if (cr.solidity < 0.9) msgs.push(M.irregular());
-        if (msgs.length) zres.status = 'warn';
+        if (cr.confidence < 0.6) msgs.push(M.lowConfidence());
+        if (msgs.length) zres.status = impossible ? 'error' : 'warn';
         zres.messages = msgs;
       });
       lap(`contour_${zr.name}`, t);

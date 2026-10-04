@@ -143,8 +143,9 @@ function RunResult({ last }: { last: LastRun }) {
                   <small>mm</small>
                 </div>
               </div>
+              {z.status === 'error' && <MessageBox m={{ code: 'REJECTED', text: 'Mesure non enregistrée.', tip: 'Reprenez la photo en suivant le conseil ci-dessous.' }} kind="error" />}
               {z.messages.map((mm) => (
-                <MessageBox m={mm} kind="warn" />
+                <MessageBox m={mm} kind={z.status === 'error' ? 'error' : 'warn'} />
               ))}
               {shot && (
                 <div class="row-actions">

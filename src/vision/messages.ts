@@ -64,8 +64,8 @@ export const M = {
   }),
   lensSize: (a: number, b: number): Msg => ({
     code: 'LENS_SIZE',
-    text: `Taille inhabituelle pour un verre (${a.toFixed(0)} × ${b.toFixed(0)} mm).`,
-    tip: 'Vérifiez qu’un seul verre est dans la zone et que rien ne le touche.',
+    text: `Forme rejetée : ${a.toFixed(0)} × ${b.toFixed(0)} mm n’est pas une taille de verre.`,
+    tip: 'Le contour a probablement englobé une ombre, un reflet ou la main. Retirez tout objet près du verre, évitez l’ombre du téléphone, et vérifiez l’image de contrôle.',
   }),
   lowConfidence: (): Msg => ({
     code: 'LOW_CONF',
@@ -74,7 +74,7 @@ export const M = {
   }),
   irregular: (): Msg => ({
     code: 'IRREGULAR',
-    text: 'Forme irrégulière détectée.',
+    text: 'Contour irrégulier : ce n’est probablement pas le bord du verre.',
     tip: 'Un reflet ou un objet touche peut-être le verre. Vérifiez l’image de contrôle.',
   }),
   classicFallback: (): Msg => ({

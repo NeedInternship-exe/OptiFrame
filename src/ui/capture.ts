@@ -66,7 +66,7 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
   );
   const shots: Shot[] = [];
   for (const z of result.zones) {
-    if (!z.contour) continue;
+    if (!z.contour || z.status === 'error') continue; // rejected shapes are never saved
     shots.push({
       id: uid(),
       eye: z.zone,
