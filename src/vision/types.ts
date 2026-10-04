@@ -34,6 +34,10 @@ export interface PipelineOptions {
   sheetFormat: 'auto' | 'letter' | 'a4';
   /** One photo per lens: the (largest) lens found is this eye, wherever it lies. */
   forceEye?: Eye | null;
+  /** Loose lenses, or complete glasses laid front face down (back view). */
+  subject?: 'lens' | 'glasses';
+  /** Glasses: how far the lens goes into the rim groove beyond the visible opening (mm). */
+  grooveDepth?: number;
   debug: boolean;
 }
 
@@ -72,6 +76,7 @@ export interface ZoneResult {
   coarse?: Poly; // contour before edge refinement
   confidence?: number;
   solidity?: number;
+  backView?: boolean; // glasses photographed from the back: mirror for a front view
   refine?: { validFrac: number; meanShift: number; maxShift: number };
   view?: ImagePatch; // rectified top view (6 px/mm)
   prob?: ImagePatch; // probability map (grey) at 3 px/mm

@@ -237,6 +237,24 @@ export function MeasureTab() {
         </section>
       )}
 
+      <div class="segmented" role="radiogroup" aria-label="Que photographiez-vous ?">
+        {(
+          [
+            ['lens', 'Verres seuls'],
+            ['glasses', 'Lunettes montées'],
+          ] as const
+        ).map(([k, label]) => (
+          <button role="radio" aria-checked={st.settings.subject === k} class={st.settings.subject === k ? 'on' : ''} onClick={() => setState({ settings: { ...st.settings, subject: k } })}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <p class="muted small mode-hint">
+        {st.settings.subject === 'glasses'
+          ? 'Lunettes posées face avant contre une feuille blanche, branches ouvertes vers le haut (rien ne doit cacher les verres). L’app mesure l’ouverture de chaque cercle et ajoute la rainure.'
+          : 'Verre démonté posé face bombée vers le haut sur une feuille blanche (ou le tapis), à plus de 1 cm des bords.'}
+      </p>
+
       <div class="lens-grid">
         {EYES.map((e) => (
           <LensCard eye={e} key={e} onShoot={shootEye} busy={!!stage} />

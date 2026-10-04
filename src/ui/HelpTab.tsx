@@ -114,6 +114,7 @@ export function HelpTab({ onLightbox }: { onLightbox: () => void }) {
             <option value="a4">A4 (210 × 297 mm)</option>
           </select>
         </label>
+        <Num label="Lunettes montées : profondeur de la rainure" hint="Partie du verre cachée dans le cercle, ajoutée à l’ouverture mesurée (0,3 à 1 mm selon la monture)." value={s.grooveDepth} step={0.1} onChange={(v) => set({ grooveDepth: Math.max(0, Math.min(2, v)) })} />
         <Num label="Hauteur du bord du verre au-dessus du papier" hint="Corrige la parallaxe (le bord est vu un peu plus loin du centre de l’image)." value={s.edgeHeight} step={0.1} onChange={(v) => set({ edgeHeight: Math.max(0, Math.min(5, v)) })} />
         <label class="field">
           <span>Longueur réelle de la règle « 100 mm » du tapis imprimé</span>

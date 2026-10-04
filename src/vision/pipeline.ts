@@ -257,6 +257,7 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
   const mats: any[] = [];
   const track = <T,>(m: T) => (mats.push(m), m);
   try {
+    const glasses = opts.subject === 'glasses';
     onStage?.('markers');
     let t = now();
     const src = track(cv.matFromImageData(img as any));
@@ -283,6 +284,12 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
       spreadPx = spreads.length ? spreads[Math.floor(spreads.length / 2)] : NaN;
       ref = { kind: 'mat', label: 'tapis OptiFrame', w: MAT.page.w, h: MAT.page.h };
       regions = matRegions(H, img.width, img.height);
+      if (glasses) {
+        // a pair of glasses spans both zones: search the whole inner area
+        const od = MAT.zones.OD, os = MAT.zones.OS;
+        const all: Region = { name: 'mat', x0: od.x - ZONE_MARGIN, y0: od.y - ZONE_MARGIN, w: os.x + os.w - od.x + 2 * ZONE_MARGIN, h: od.h + 2 * ZONE_MARGIN, maxLenses: 2 };
+        regions = regionVisible(H, all, img.width, img.height) ? [all] : regions.map((r) => ({ ...r, eye: undefined }));
+      }
       if (!regions.length) return (res.errors.push(M.noZone()), res);
     } else {
       const white = track(minChannel(cv, src));
@@ -382,10 +389,10 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
         zr.eye != null
           ? found.map(() => zr.eye!)
           : found.length === 2
-            ? cxOf(found[0]) < cxOf(found[1])
+            ? (cxOf(found[0]) < cxOf(found[1])) !== glasses // glasses are seen from the back
               ? ['OD', 'OS']
               : ['OS', 'OD']
-            : found.map((c) => (cxOf(c) < ref.w / 2 ? 'OD' : 'OS'));
+            : found.map((c) => ((cxOf(c) < ref.w / 2) !== glasses ? 'OD' : 'OS'));
       if (!found.length && zr.eye) res.zones.push({ zone: zr.eye, status: 'empty', messages: [], method, view: viewPatch, prob: probP });
 
       found.forEach((cr, k) => {
@@ -396,12 +403,16 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
         zres.solidity = cr.solidity;
         let contour = cr.contour;
         if (opts.refine) {
-          const r = refineContour(g, H, contour);
+          const r = refineContour(g, H, contour, 0.9, 0.04, 0.45, glasses ? -1 : 1);
           contour = smoothContour(r.contour);
           zres.refine = r.stats;
         }
         // corrections: parallax (edge above the paper), print scale, bias
         contour = correctParallax(contour, pose, opts.edgeHeight);
+        if (glasses) {
+          contour = offsetNormal(contour, opts.grooveDepth ?? 0.5); // lens part hidden in the groove
+          zres.backView = true; // the shape is mirrored to a front view when it is saved
+        }
         if (opts.printScale !== 1) {
           const c = centroid(contour);
           contour = contour.map(([x, y]) => [c[0] + (x - c[0]) * opts.printScale, c[1] + (y - c[1]) * opts.printScale]);

@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from dataset import SPEC, mat_raster
-from lenssynth import camera_effects, paper_background, random_lens_shape, render_lenses
+from lenssynth import camera_effects, paper_background, random_lens_shape, render_frame, render_lenses
 
 PPM = 14.0  # rendering resolution of the flat mat (px/mm)
 
@@ -79,6 +79,7 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--res", default="4032x3024", help="photo size, e.g. 1920x1440 for a browser video frame")
     ap.add_argument("--sheet", default="", choices=["", "letter", "a4"], help="blank sheet instead of the printed mat")
+    ap.add_argument("--glasses", action="store_true", help="complete glasses (frame around the openings), seen from the back")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -95,9 +96,25 @@ def main():
             page = np.full((int(round(sh * PPM)), int(round(sw * PPM))), 255, np.uint8)
             backlit = False
             bg = paper_background(rng, page, backlit)
-            n_l = 2 if (sw > sh and rng.random() < 0.6) else 1
+            if args.glasses and sw < sh:
+                sw, sh = sh, sw
+                page = np.full((int(round(sh * PPM)), int(round(sw * PPM))), 255, np.uint8)
+                bg = paper_background(rng, page, backlit)
+            n_l = 2 if (args.glasses or (sw > sh and rng.random() < 0.6)) else 1
             mode = "sheet-pair" if n_l == 2 else "sheet-one"
             slots = [(12, sw / 2 - 4), (sw / 2 + 4, sw - 12)] if n_l == 2 else [(12, sw - 12)]
+            if args.glasses:  # a real pair: mirrored shapes, ~18 mm bridge, same height
+                shape = random_lens_shape(rng)
+                half = (shape.max(0) - shape.min(0)) / 2
+                dbl = rng.uniform(15, 21)
+                cy = rng.uniform(15 + half[1], sh - 15 - half[1])
+                cx0 = sw / 2 + rng.uniform(-15, 15)
+                for sgn in (-1, 1):
+                    sh_ = shape.copy() * [sgn, 1]
+                    poly_mm = sh_ + [cx0 + sgn * (dbl / 2 + half[0]), cy]
+                    polys_px.append(poly_mm * PPM - 0.5)
+                    lenses.append({"zone": "OS" if sgn < 0 else "OD", "poly": poly_mm.round(4).tolist()})
+                slots = []
             for xa, xb in slots:
                 shape = random_lens_shape(rng)
                 a = np.deg2rad(rng.uniform(-6, 6))
@@ -108,7 +125,7 @@ def main():
                 poly_mm = shape + [cx, cy]
                 polys_px.append(poly_mm * PPM - 0.5)
                 lenses.append({"zone": "OD" if cx < sw / 2 else "OS", "poly": poly_mm.round(4).tolist()})
-            if n_l == 2:
+            if n_l == 2 and not args.glasses:
                 lenses[0]["zone"], lenses[1]["zone"] = "OD", "OS"
             Hm_, Wm_ = page.shape
             target, span = (sw / 2, sh / 2), (sw + 20, sh + 20)
@@ -136,6 +153,8 @@ def main():
                 zs = SPEC["zones"][mode]
                 target, span = (zs["x"] + zs["w"] / 2, zs["y"] + zs["h"] / 2), (zs["w"] + 70, zs["h"] + 66)
         flat, _ = render_lenses(bg, polys_px, PPM, rng, backlit)
+        if args.glasses:
+            flat = render_frame(flat, polys_px, PPM, rng)
 
         rw, rh = (int(v) for v in args.res.split("x"))
         if args.sheet:  # phone held so that the sheet fills the frame
@@ -158,7 +177,7 @@ def main():
         img = camera_effects(rng, img, strength=1.6)
         name = f"photo_{k:03d}.jpg"
         cv2.imwrite(str(out / name), img[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 92])
-        gt_all.append({"file": name, "mode": str(mode), "backlit": bool(backlit), "camera": cam, "lenses": lenses, "reference": args.sheet or "mat"})
+        gt_all.append({"file": name, "mode": str(mode), "backlit": bool(backlit), "camera": cam, "lenses": lenses, "reference": args.sheet or "mat", "subject": "glasses" if args.glasses else "lens"})
         print(name, mode, "backlit" if backlit else "ambient", f"tilt {cam['tilt_deg']:.0f}")
     (out / "ground_truth.json").write_text(json.dumps(gt_all))
 

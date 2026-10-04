@@ -180,7 +180,13 @@ export function Camera({ target, onCapture, onClose, onFile }: Props) {
           <span style={{ width: 44 }} />
         )}
       </div>
-      <div class="camera-target">{target ? `${EYE_LABEL[target]} · un seul verre sur la feuille` : 'Les 2 verres · le droit (OD) à gauche'}</div>
+      <div class="camera-target">
+        {st.settings.subject === 'glasses'
+          ? 'Lunettes face avant contre la feuille · branches ouvertes'
+          : target
+            ? `${EYE_LABEL[target]} · un seul verre sur la feuille`
+            : 'Les 2 verres · le droit (OD) à gauche'}
+      </div>
       {error && (
         <div class="camera-error">
           <p>{error}</p>

@@ -18,6 +18,8 @@ export interface Settings {
   printScale: number;
   bias: number;
   sheetFormat: 'auto' | 'letter' | 'a4';
+  subject: 'lens' | 'glasses';
+  grooveDepth: number;
 }
 
 export interface Shot {
@@ -77,7 +79,7 @@ export interface State {
   collect: Collect;
 }
 
-export const DEFAULT_SETTINGS: Settings = { useModel: true, refine: true, align: true, edgeHeight: 1.0, printScale: 1, bias: 0, sheetFormat: 'auto' };
+export const DEFAULT_SETTINGS: Settings = { useModel: true, refine: true, align: true, edgeHeight: 1.0, printScale: 1, bias: 0, sheetFormat: 'auto', subject: 'lens', grooveDepth: 0.5 };
 const KEY = 'optiframe:v1';
 const PERSIST: (keyof State)[] = ['settings', 'shots', 'use', 'frame', 'onboarded', 'collect'];
 

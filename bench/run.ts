@@ -43,7 +43,8 @@ const rows: Record<string, unknown>[] = [];
 let missed = 0;
 for (const g of gt) {
   const img = readJpeg(join(dir, g.file));
-  const res = await processPhoto(engine, img, opts);
+  const glasses = (g as { subject?: string }).subject === 'glasses';
+  const res = await processPhoto(engine, img, glasses ? { ...opts, subject: 'glasses', grooveDepth: 0 } : opts);
   for (const lens of g.lenses) {
     const z = res.zones.find((zz) => zz.zone === lens.zone);
     if (!z?.contour) {

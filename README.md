@@ -44,6 +44,11 @@ la même forme.
 - **Boîte lumineuse (recommandée)** : poser le tapis sur l’écran d’un portable affichant du blanc (bouton *Boîte lumineuse* dans l’app). Le papier devient translucide et le bord du verre ressort en noir très net.
 - Au moins 3 repères suffisent : on peut cadrer les deux zones à la fois ou une seule, de plus près.
 
+**Lunettes montées (mode « Lunettes montées »).** Pour mesurer les verres d’une paire complète (par exemple celle du jury) sans les démonter :
+- poser les lunettes **face avant contre la feuille**, branches ouvertes vers le haut. Rien ne doit passer devant les verres : une branche repliée sur un verre cache sa forme ;
+- l’IA, entraînée aussi sur des montures synthétiques (écaille, couleur, noir, métal fin, acétate transparent), détoure l’**ouverture de chaque cercle**. Le recalage cherche alors le bord « verre clair → cercle sombre » ;
+- la photo voit l’arrière : l’app inverse gauche et droite et remet chaque forme en vue de face. Elle corrige la parallaxe pour un bord à environ 3,5 mm du papier (l’épaisseur du cercle), puis ajoute la **profondeur de rainure** (0,5 mm par défaut, réglable), c’est-à-dire la partie du verre cachée dans le cercle.
+
 **Dans les deux cas**, le verre est posé face bombée vers le haut : son bord touche le papier, il est donc dans le plan de référence.
 Le bord reste un peu au-dessus du papier : l’app corrige cette **parallaxe** à partir de la position de la caméra retrouvée par l’homographie.
 
@@ -142,7 +147,7 @@ Générée par [`src/frame/frame.ts`](src/frame/frame.ts) avec **manifold-3d**, 
 - **L’échelle dépend de la référence.** Avec le tapis, contrôler la règle de 100 mm (correction possible dans l’app). Avec une feuille blanche, la précision dépend de la coupe du papier (±0,5 mm sur 280 mm, soit environ 0,1 mm sur un verre) et de sa planéité. La feuille doit contraster avec la table.
 - **Hauteur du bord pour la parallaxe** : la valeur par défaut est de 1 mm. Une erreur de 1 mm sur cette hauteur produit environ 0,1 à 0,2 mm d’erreur sur A.
 - **Orientation du verre** : A et B dépendent de l’orientation horizontale du verre. Il faut poser le verre droit ; l’app ne corrige que ±8°.
-- **Lunettes complètes (verres montés)** : non prises en charge, la monture surélève les verres. Il faut des verres démontés.
+- **Lunettes montées** : le contour d’un verre monté est estimé à partir de l’ouverture du cercle plus une profondeur de rainure typique (0,5 mm). C’est moins précis qu’un verre démonté, car la profondeur réelle varie de 0,3 à 1 mm selon la monture. La paire doit être posée face avant contre la feuille, branches ouvertes.
 - **Monture** : les branches ne sont pas générées, seulement les tenons. Le clipsage dépend du matériau : en PLA rigide, réduire la lèvre arrière ou passer en PETG.
 - **Sans IA** (modèle non chargé), la segmentation classique n’est fiable qu’avec la boîte lumineuse.
 

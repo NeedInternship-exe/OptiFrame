@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from gen_mat import render_raster
-from lenssynth import camera_effects, paper_background, random_lens_shape, render_lenses
+from lenssynth import camera_effects, paper_background, random_lens_shape, render_frame, render_lenses
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = json.loads((ROOT / "shared" / "mat.json").read_text())
@@ -90,6 +90,9 @@ def make_sample(seed: int, size: int = 256, ppm: float = PPM):
             c = rng.uniform(-half * 0.6, span_mm + half * 0.6)
         polys.append((shape + c) * R)
     img, label = render_lenses(bg, polys, R, rng, backlit)
+    # mounted glasses (35 %): the label is the visible opening inside the rim
+    if polys and rng.random() < 0.35:
+        img = render_frame(img, polys, R, rng)
     img = add_dust(rng, img, R)
     img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
     label = cv2.resize(label, (size, size), interpolation=cv2.INTER_AREA)

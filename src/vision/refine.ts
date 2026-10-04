@@ -3,7 +3,8 @@
 // The network gives a robust outline at 3 px/mm. For each outline point we
 // sample the full-resolution photo along the outward normal (through the
 // homography, so no resampling loss), and snap to the nearby intensity edge
-// "lens edge (dark) -> paper (bright)". Weak or ambiguous edges keep the
+// "lens edge (dark) -> paper (bright)" (or "lens -> dark rim" for glasses in a
+// frame). Weak or ambiguous edges keep the
 // network position; offsets are median-filtered and smoothed along the outline.
 
 import { circularGauss, circularMedian, normals, type Poly } from '../core/geom.ts';
@@ -16,7 +17,7 @@ export interface RefineStats {
   maxShift: number;
 }
 
-export function refineContour(g: Gray, H: Mat3, poly: Poly, range = 0.9, step = 0.04, prior = 0.45): { contour: Poly; stats: RefineStats } {
+export function refineContour(g: Gray, H: Mat3, poly: Poly, range = 0.9, step = 0.04, prior = 0.45, sign: 1 | -1 = 1): { contour: Poly; stats: RefineStats } {
   const n = poly.length;
   const nr = normals(poly);
   const S = Math.round((2 * range) / step) + 1;
@@ -49,7 +50,8 @@ export function refineContour(g: Gray, H: Mat3, poly: Poly, range = 0.9, step = 
       const a = Math.abs(d);
       if (a < Math.abs(dv[k - 1]) || a < Math.abs(dv[k + 1])) continue; // local extremum only
       const t = -range + k * step;
-      const score = (d > 0 ? a : 0.5 * a) * Math.exp(-0.5 * (t / prior) ** 2);
+      // loose lens: dark bevel -> bright paper outward (sign +1); lens in a frame: bright lens -> dark rim (-1)
+      const score = (d * sign > 0 ? a : 0.5 * a) * Math.exp(-0.5 * (t / prior) ** 2);
       if (score > best) (best = score), (bk = k);
     }
     if (bk < 0) continue;

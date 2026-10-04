@@ -347,3 +347,69 @@ def camera_effects(rng, img: np.ndarray, strength: float = 1.0) -> np.ndarray:
         ok, buf = cv2.imencode(".jpg", out[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, q])
         out = cv2.imdecode(buf, cv2.IMREAD_COLOR)[..., ::-1]
     return np.ascontiguousarray(out)
+
+
+# ----------------------------------------------------------------------------- frames
+def _texture(rng, shape, kind):
+    """Colour texture of a frame material, float RGB."""
+    H, W = shape
+    if kind == "tortoise":
+        n1 = cv2.resize(rng.normal(0, 1, (max(2, H // 18), max(2, W // 18))).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
+        n2 = cv2.resize(rng.normal(0, 1, (max(2, H // 6), max(2, W // 6))).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
+        spots = np.clip((n1 + 0.5 * n2 - rng.uniform(0.3, 1.0)) * 2, 0, 1)[..., None]
+        dark = np.array([0.08, 0.05, 0.03]) * rng.uniform(0.6, 1.4)
+        amber = np.array([0.75, 0.48, 0.12]) * rng.uniform(0.7, 1.1)
+        return (dark * (1 - spots) + amber * spots).astype(np.float32)
+    if kind == "solid":
+        col = np.array([[0.05, 0.05, 0.06], [0.12, 0.1, 0.09], [0.1, 0.15, 0.35], [0.45, 0.08, 0.1], [0.2, 0.3, 0.25], [0.7, 0.65, 0.6]])[rng.integers(6)]
+        return np.broadcast_to(col * rng.uniform(0.8, 1.2), (H, W, 3)).astype(np.float32).copy()
+    # metal: grey / gold
+    col = np.array([[0.55, 0.56, 0.58], [0.72, 0.6, 0.35], [0.25, 0.25, 0.27]])[rng.integers(3)]
+    return np.broadcast_to(col, (H, W, 3)).astype(np.float32).copy()
+
+
+def render_frame(img: np.ndarray, polys_px: list[np.ndarray], ppm: float, rng: np.random.Generator) -> np.ndarray:
+    """Draw a spectacle frame around lens openings (the polygons = visible openings).
+
+    Rim of 1-8 mm (metal thin, acetate thick), optional transparent acetate,
+    a bridge towards one side and an endpiece/hinge block on the other, a cast
+    shadow on the paper and a dark line where the lens enters the groove.
+    """
+    H, W = img.shape[:2]
+    kind = rng.choice(["tortoise", "solid", "metal", "clear"], p=[0.35, 0.35, 0.18, 0.12])
+    w = rng.uniform(1.0, 2.5) if kind == "metal" else rng.uniform(3.0, 8.0)
+    alpha = rng.uniform(0.35, 0.7) if kind == "clear" else 1.0
+    mask = np.zeros((H, W), np.uint8)
+    for p in polys_px:
+        cv2.fillPoly(mask, [np.round(p * 16).astype(np.int32)], 1, cv2.LINE_AA, 4)
+    out_d = cv2.distanceTransform(1 - mask, cv2.DIST_L2, 5) / ppm  # mm outside the openings
+    in_d = cv2.distanceTransform(mask, cv2.DIST_L2, 5) / ppm
+    rim = ((out_d > 0) & (out_d <= w)).astype(np.float32)
+    # bridge (nasal side) and endpiece (temporal side) for each opening
+    for p in polys_px:
+        bx0, by0 = p.min(0)
+        bx1, by1 = p.max(0)
+        cy = by0 + (by1 - by0) * rng.uniform(0.25, 0.45)
+        side = 1 if rng.random() < 0.5 else -1
+        bw = rng.uniform(3, 6) * ppm
+        xa = bx1 if side > 0 else bx0
+        cv2.rectangle(rim, (int(xa), int(cy - bw / 2)), (int(xa + side * 25 * ppm), int(cy + bw / 2)), 1.0, -1)
+        xe = bx0 if side > 0 else bx1
+        eh = rng.uniform(5, 9) * ppm
+        cv2.rectangle(rim, (int(xe - side * (w * ppm + rng.uniform(3, 7) * ppm)), int(cy - eh / 2)), (int(xe), int(cy + eh / 2)), 1.0, -1)
+    rim *= 1 - mask  # never over the openings
+    rim = cv2.GaussianBlur(rim, (0, 0), 0.4)
+    # shadow of the frame on the paper
+    dx, dy = rng.uniform(-3, 3, 2) * ppm
+    sh = cv2.warpAffine(rim, np.float32([[1, 0, dx], [0, 1, dy]]), (W, H))
+    sh = cv2.GaussianBlur(sh, (0, 0), rng.uniform(1, 4) * ppm) * rng.uniform(0.1, 0.4)
+    img = img * (1 - sh * (1 - mask))[..., None]
+    tex = _texture(rng, (H, W), "solid" if kind == "clear" else kind)
+    if kind in ("metal", "solid", "clear"):  # specular line along the rim
+        hl = np.exp(-0.5 * ((out_d - w * rng.uniform(0.3, 0.7)) / (0.15 * w + 0.1)) ** 2) * rng.uniform(0.1, 0.5)
+        tex = tex + hl[..., None]
+    a = (rim * alpha)[..., None]
+    img = img * (1 - a) + tex * a
+    # dark line where the lens disappears into the groove
+    groove = np.exp(-0.5 * (in_d / rng.uniform(0.15, 0.5)) ** 2) * mask * rng.uniform(0.1, 0.5)
+    return (img * (1 - groove[..., None])).astype(np.float32)

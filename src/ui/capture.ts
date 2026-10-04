@@ -1,4 +1,5 @@
 // Photo acquisition (file / camera frame) and hand-off to the vision worker.
+import { centroid, type Poly, type Vec2 } from '../core/geom.ts';
 import { collectRun } from './collect.ts';
 import { getState, setState, uid, type Shot } from './store.ts';
 import { VisionClient } from '../vision/client.ts';
@@ -55,11 +56,15 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
     {
       useModel: settings.useModel,
       refine: settings.refine,
-      edgeHeight: settings.edgeHeight,
+      // glasses lie front face down: the visible opening is the back of the
+      // rim, about one rim thickness (~3.5 mm) above the paper
+      edgeHeight: settings.subject === 'glasses' ? Math.max(settings.edgeHeight, 3.5) : settings.edgeHeight,
       printScale: 1, // applied retroactively in shotLens()
       bias: 0,
       sheetFormat: settings.sheetFormat,
       forceEye,
+      subject: settings.subject,
+      grooveDepth: settings.grooveDepth,
       debug: true,
     },
     onStage,
@@ -71,7 +76,8 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
       id: uid(),
       eye: z.zone,
       time: Date.now(),
-      raw: z.contour,
+      // glasses are photographed from the back: mirror to a front view
+      raw: z.backView ? mirrorAboutCentroid(z.contour) : z.contour,
       method: z.method,
       source,
       quality: result.quality,
@@ -98,4 +104,9 @@ export async function analyse(c: Captured, source: Shot['source'], onStage?: (s:
     last: { result, photo: c.preview, shotIds: shots.map((x) => x.id), time: Date.now(), source },
   }));
   return result;
+}
+
+function mirrorAboutCentroid(p: Poly): Poly {
+  const cx = centroid(p)[0];
+  return p.map(([x, y]) => [2 * cx - x, y] as Vec2).reverse();
 }
