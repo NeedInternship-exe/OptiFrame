@@ -14,7 +14,7 @@
 import { offsetNormal, centroid, type Vec2 } from '../core/geom.ts';
 import { applyH, cameraPose, correctParallax, localScale, mul3, type Mat3 } from '../core/homography.ts';
 import { MAT, MARKER_BY_ID, type Eye } from '../core/mat.ts';
-import { detectMarkers, detectSheet, orderQuad, refineMarker, refineSheet, type Gray } from './aruco.ts';
+import { detectMarkers, detectSheet, minChannel, orderQuad, refineMarker, refineSheet, type Gray } from './aruco.ts';
 import { M } from './messages.ts';
 import { refineContour } from './refine.ts';
 import { classicSegment, modelSegment, probToContour, smoothContour, type ContourResult, type ModelRunner } from './segment.ts';
@@ -210,7 +210,9 @@ export function detectLive(cv: CV, img: RGBAImage): LiveDetection {
         res.tiltDeg = cameraPose(fit.H, img.width, img.height).tiltDeg;
       }
     } else {
-      const q = detectSheet(cv, gray);
+      const white = minChannel(cv, src);
+      const q = detectSheet(cv, [gray, white]);
+      white.delete();
       if (q) {
         res.sheet = norm(q);
         res.tiltDeg = cameraPose(sheetLayout(cv, q, img.width, img.height, 'auto').H, img.width, img.height).tiltDeg;
@@ -283,12 +285,17 @@ export async function processPhoto(engine: Engine, img: RGBAImage, opts: Pipelin
       regions = matRegions(H, img.width, img.height);
       if (!regions.length) return (res.errors.push(M.noZone()), res);
     } else {
-      let q0 = detectSheet(cv, det.img);
+      const white = track(minChannel(cv, src));
+      const whiteDet = track(new cv.Mat());
+      cv.resize(white, whiteDet, new cv.Size(det.img.cols, det.img.rows), 0, 0, cv.INTER_AREA);
+      let q0 = detectSheet(cv, [det.img, whiteDet]);
       if (!q0) return (res.errors.push(res.markers.length ? M.fewMarkers(res.markers.length) : M.noMarkers()), res);
-      // wide edge search on the small image, then fine line fit at full resolution
-      const gd: Gray = { data: new Uint8Array(det.img.data), width: det.img.cols, height: det.img.rows };
+      // wide edge search on the small image, then fine line fit at full
+      // resolution, both on the whiteness channel (best paper/table contrast)
+      const gd: Gray = { data: new Uint8Array(whiteDet.data), width: whiteDet.cols, height: whiteDet.rows };
       q0 = refineSheet(gd, q0, true).corners;
-      const rq = refineSheet(g, q0.map((p) => unscale(p, det.s)));
+      const gw: Gray = { data: new Uint8Array(white.data), width: white.cols, height: white.rows };
+      const rq = refineSheet(gw, q0.map((p) => unscale(p, det.s)));
       const corners = orderQuad(rq.corners);
       const lay = sheetLayout(cv, corners, img.width, img.height, opts.sheetFormat);
       H = lay.H;

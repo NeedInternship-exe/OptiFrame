@@ -179,14 +179,17 @@ export function refineQuad(g: Gray, c: Vec2[], o: QuadOpts): { corners: Vec2[]; 
       const sub = den < 0 ? (0.5 * (y0 - y2)) / den : 0;
       const off = -w + (bi + Math.max(-0.5, Math.min(0.5, sub))) * step;
       pts.push([px + nrm[0] * off, py + nrm[1] * off]);
-      // 20-80 % rise distance (blur estimate)
-      const l20 = lo + 0.2 * (hi - lo), l80 = lo + 0.8 * (hi - lo);
-      let s20 = NaN, s80 = NaN;
-      for (let s = 1; s < S; s++) {
-        if (Number.isNaN(s20) && prof[s - 1] < l20 && prof[s] >= l20) s20 = s - 1 + (l20 - prof[s - 1]) / (prof[s] - prof[s - 1]);
-        if (Number.isNaN(s80) && prof[s - 1] < l80 && prof[s] >= l80) s80 = s - 1 + (l80 - prof[s - 1]) / (prof[s] - prof[s - 1]);
-      }
-      if (s80 > s20) spreads.push((s80 - s20) * step);
+      // blur: full width at half maximum of the gradient peak, expressed as an
+      // equivalent 20-80 % rise (x 0.713 for a Gaussian edge); unlike a
+      // plateau-to-plateau rise it ignores slow shading near the edge
+      let l = bi, r = bi;
+      while (l > 2 && dv[l - 1] > y1 / 2) l--;
+      while (r < S - 3 && dv[r + 1] > y1 / 2) r++;
+      const fl = l - 1 + (y1 / 2 - dv[l - 1]) / Math.max(1e-6, dv[l] - dv[l - 1]);
+      const fr = r + (dv[r] - y1 / 2) / Math.max(1e-6, dv[r] - dv[r + 1]);
+      const fwhm = Math.max(0, fr - fl) * step;
+      // the 5-tap derivative itself spreads a perfect edge over ~2 samples
+      spreads.push(0.713 * Math.sqrt(Math.max(0, fwhm * fwhm - (2 * step) ** 2)));
     }
     lines.push(fitLine(pts));
   }
@@ -230,26 +233,42 @@ const SHEET_OPTS: QuadOpts = {
   maxMove: (side) => Math.max(6, 0.03 * side),
 };
 
-/**
- * Find a bright sheet of paper (its 4 corners) on a darker background.
- * Works on a downscaled grey image; corners are ordered clockwise starting
- * from the top-left one of the image.
- */
-export function detectSheet(cv: CV, gray: any): Vec2[] | null {
-  const blur = new cv.Mat(), bin = new cv.Mat(), cs = new cv.MatVector(), hier = new cv.Mat();
+/** Mean brightness step across the 4 sides (inside - outside), in grey levels. */
+function edgeSupport(gray: any, q: Vec2[]): number {
+  const W = gray.cols, H = gray.rows, d = gray.data;
+  const at = (x: number, y: number) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    return xi >= 0 && yi >= 0 && xi < W && yi < H ? d[yi * W + xi] : NaN;
+  };
+  const cx = q.reduce((s, p) => s + p[0], 0) / 4, cy = q.reduce((s, p) => s + p[1], 0) / 4;
+  let worst = Infinity;
+  for (let e = 0; e < 4; e++) {
+    const a = q[e], b = q[(e + 1) % 4];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    let nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+    if (nx * ((a[0] + b[0]) / 2 - cx) + ny * ((a[1] + b[1]) / 2 - cy) < 0) (nx = -nx), (ny = -ny); // outward
+    const steps: number[] = [];
+    for (let k = 1; k < 30; k++) {
+      const t = k / 30, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
+      const v = at(x - nx * 4, y - ny * 4) - at(x + nx * 4, y + ny * 4);
+      if (Number.isFinite(v)) steps.push(v);
+    }
+    steps.sort((u, v) => u - v);
+    // the weakest side decides: a wrong corner leaves one side off the paper edge
+    worst = Math.min(worst, steps.length ? steps[Math.floor(steps.length / 2)] : 0);
+  }
+  return worst;
+}
+
+function quadsFromBinary(cv: CV, bin: any, minArea: number): Vec2[][] {
+  const cs = new cv.MatVector(), hier = new cv.Mat();
+  const out: Vec2[][] = [];
   try {
-    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-    cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
-    const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-    cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k);
-    k.delete();
     cv.findContours(bin, cs, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-    const imgArea = gray.rows * gray.cols;
-    let best: Vec2[] | null = null, bestA = 0;
     for (let i = 0; i < cs.size(); i++) {
       const cnt = cs.get(i);
       const a = cv.contourArea(cnt);
-      if (a < 0.08 * imgArea || a < bestA) continue;
+      if (a < minArea) continue;
       const hull = new cv.Mat(), poly = new cv.Mat();
       cv.convexHull(cnt, hull, false, true);
       const peri = cv.arcLength(hull, true);
@@ -258,22 +277,74 @@ export function detectSheet(cv: CV, gray: any): Vec2[] | null {
         if (poly.rows <= 4) break;
       }
       if (poly.rows === 4) {
-        const d = poly.data32S;
-        const q: Vec2[] = [0, 1, 2, 3].map((j) => [d[2 * j], d[2 * j + 1]]);
-        // the quad must touch the image border at most marginally (all 4 corners visible)
-        const inside = q.every(([x, y]) => x > 2 && y > 2 && x < gray.cols - 3 && y < gray.rows - 3);
-        if (inside && quadArea(q) > 0.85 * a) (best = orderQuad(q)), (bestA = a);
+        const dd = poly.data32S;
+        const q: Vec2[] = [0, 1, 2, 3].map((j) => [dd[2 * j], dd[2 * j + 1]]);
+        const inside = q.every(([x, y]) => x > 2 && y > 2 && x < bin.cols - 3 && y < bin.rows - 3);
+        if (inside && quadArea(q) > 0.85 * a) out.push(orderQuad(q));
       }
       hull.delete();
       poly.delete();
+    }
+  } finally {
+    cs.delete();
+    hier.delete();
+  }
+  return out;
+}
+
+/**
+ * Find a bright sheet of paper (its 4 corners) on a darker background.
+ * Two binarisations compete (global Otsu, and a large-window local threshold
+ * that survives shadows on the paper); the quadrilateral whose 4 sides show
+ * the strongest paper/table contrast wins. Corners are ordered clockwise
+ * starting from the top-left one of the image.
+ */
+export function detectSheet(cv: CV, channels: any[]): Vec2[] | null {
+  const blur = new cv.Mat(), bin = new cv.Mat();
+  const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+  try {
+    let best: Vec2[] | null = null, bestScore = 0;
+    for (const ch of channels) {
+      cv.GaussianBlur(ch, blur, new cv.Size(5, 5), 0);
+      const minArea = 0.08 * ch.rows * ch.cols;
+      const cands: Vec2[][] = [];
+      cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+      cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k);
+      cands.push(...quadsFromBinary(cv, bin, minArea));
+      let block = Math.round(0.45 * Math.min(ch.rows, ch.cols));
+      block += block % 2 ? 0 : 1;
+      cv.adaptiveThreshold(blur, bin, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, block, -6);
+      cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k);
+      cv.morphologyEx(bin, bin, cv.MORPH_CLOSE, k);
+      cands.push(...quadsFromBinary(cv, bin, minArea));
+      for (const q of cands) {
+        const sup = edgeSupport(blur, q);
+        if (sup < 10) continue;
+        const score = sup * Math.sqrt(quadArea(q));
+        if (score > bestScore) (bestScore = score), (best = q);
+      }
     }
     return best;
   } finally {
     blur.delete();
     bin.delete();
-    cs.delete();
-    hier.delete();
+    k.delete();
   }
+}
+
+/**
+ * "Whiteness" image: min(R, G, B). White paper stays high even in shadow
+ * (neutral grey), while a coloured table (wood, fabric) drops.
+ */
+export function minChannel(cv: CV, rgba: any): any {
+  const ch = new cv.MatVector();
+  cv.split(rgba, ch);
+  const r = ch.get(0), g = ch.get(1), b = ch.get(2), a = ch.get(3);
+  const out = new cv.Mat();
+  cv.min(r, g, out);
+  cv.min(out, b, out);
+  r.delete(), g.delete(), b.delete(), a.delete(), ch.delete();
+  return out;
 }
 
 /** Clockwise order (image y down) starting at the corner nearest the image top-left. */
